@@ -3,6 +3,7 @@ package syso
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +18,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const ErrLim = 50
+const (
+	ErrLim   = 50
+	StatsDir = "./stats"
+)
 
 var (
 	ErrNotElf          = errors.New("not an elf")
@@ -25,28 +29,33 @@ var (
 )
 
 type Stat struct {
-	SyscallNr int
-	Library   string
+	SyscallNr uint64 `json:"syscall_nr,omitempty"`
+	Library   string `json:"library,omitempty"`
+	Pid       int32  `json:"pid,omitempty"`
+	Ppid      int32  `json:"ppid,omitempty"`
+	Timestamp uint64 `json:"timestamp,omitempty"`
 }
 
 // Tracer gathers information about system call statistics by dynamic execution
 type Tracer interface {
 	// Trace records all system calls for the given executable and its arguments
 	Trace(binPath string, args ...string) error
-	Stats() []Stat
+	DumpStats(fp string) error
 }
 
 func NewTracer(logger *zap.SugaredLogger, statsList []Stat) Tracer {
 	return &tracer{
 		logger: logger,
 		stats:  statsList,
+		maps:   NewProcMaps(logger),
 	}
 }
 
 type tracer struct {
-	stats   []Stat
 	logger  *zap.SugaredLogger
+	maps    ProcMaps
 	stopper chan os.Signal
+	stats   []Stat
 }
 
 func (t *tracer) Trace(binPath string, args ...string) error {
@@ -96,7 +105,7 @@ func (t *tracer) Trace(binPath string, args ...string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get reader to sc_events_map: %w", err)
 	}
-	defer rd.Flush()
+	defer rd.Close()
 
 	if t.stopper == nil {
 		t.stopper = make(chan os.Signal, 1)
@@ -107,19 +116,35 @@ func (t *tracer) Trace(binPath string, args ...string) error {
 
 	cmd.Stdout = os.Stdout
 
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("executable failed to start: %w", err)
 	}
+	defer cmd.Wait()
 
 	if err := t.listen(rd); err != nil {
 		return fmt.Errorf("listening to ring buffer failed: %w", err)
 	}
 
+	if err := t.DumpStats(fmt.Sprintf("%s-stats.json", binPath)); err != nil {
+		return fmt.Errorf("failed to save stats: %w", err)
+	}
+
 	return nil
 }
 
-func (t *tracer) Stats() []Stat {
-	return t.stats
+func (t *tracer) DumpStats(fp string) error {
+	t.logger.Infow("writing stats to file", "fp", fp)
+
+	bts, err := json.Marshal(t.stats)
+	if err != nil {
+		return fmt.Errorf("failed to marshall stats: %w", err)
+	}
+
+	if err := os.WriteFile(fp, bts, 0x777); err != nil {
+		return fmt.Errorf("failed to write to file: %w", err)
+	}
+
+	return nil
 }
 
 func (t *tracer) isElf(fp string) (bool, error) {
@@ -147,7 +172,6 @@ func (t *tracer) listen(rd *ringbuf.Reader) error {
 	follow[int32(pid)] = true
 
 	for {
-
 		go func() {
 			<-t.stopper
 
@@ -170,6 +194,8 @@ func (t *tracer) listen(rd *ringbuf.Reader) error {
 
 			t.logger.Errorw("failed to read from record", "err", err)
 
+			failures++
+
 			continue
 		}
 
@@ -189,13 +215,24 @@ func (t *tracer) listen(rd *ringbuf.Reader) error {
 
 		follow[event.Pid] = true
 
-		t.logger.Infow("hit",
-			"pc", event.Pc,
-			"syscall_nr", event.SyscallNr,
-			"(kernal) pid", event.Pid,
-			"(kernel) ppid", event.Ppid,
-			"dirty", event.Dirty,
-		)
+		sharedLib, err := t.maps.AssignPC(event.Pc, event.Pid, event.Dirty)
+		if err != nil {
+			t.logger.Errorw(
+				"failed to assign pc to shared library: ",
+				"pc", event.Pc,
+				"pid", event.Pid,
+				"ppid", event.Ppid,
+				"err", err,
+			)
+		}
+
+		t.stats = append(t.stats, Stat{
+			SyscallNr: event.SyscallNr,
+			Library:   sharedLib,
+			Pid:       event.Pid,
+			Ppid:      event.Ppid,
+			Timestamp: event.Timestamp,
+		})
 	}
 
 	return nil

@@ -11,6 +11,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const debug = false
+
 type MemMap struct {
 	AddrStart uint64
 	AddrEnd   uint64
@@ -65,7 +67,9 @@ func (p ProcMaps) ByPID(pid int32, dirty bool) ([]*MemMap, error) {
 
 		p.files[pid] = f
 
-		p.logger.Infow("loading proc maps from filesystem", "pid", pid)
+		if debug {
+			p.logger.Infow("loading proc maps from filesystem", "pid", pid)
+		}
 	}
 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -108,7 +112,9 @@ func (p ProcMaps) ByPID(pid int32, dirty bool) ([]*MemMap, error) {
 		return nil, fmt.Errorf("failed to seek to start of file")
 	}
 
-	p.logger.Infow("Loaded proc/[PID]/maps", "c", c)
+	if debug {
+		p.logger.Infow("Loaded proc/[PID]/maps", "c", c)
+	}
 
 	return p.maps[pid], nil
 }
