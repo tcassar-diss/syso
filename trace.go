@@ -5,15 +5,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/ringbuf"
-	"github.com/cilium/ebpf/rlimit"
-	"go.uber.org/zap"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
+
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/ringbuf"
+	"github.com/cilium/ebpf/rlimit"
+	"go.uber.org/zap"
 )
 
 const ErrLim = 50
@@ -193,6 +194,7 @@ func (t *tracer) listen(rd *ringbuf.Reader) error {
 			"syscall_nr", event.SyscallNr,
 			"(kernal) pid", event.Pid,
 			"(kernel) ppid", event.Ppid,
+			"dirty", event.Dirty,
 		)
 	}
 

@@ -31,8 +31,6 @@ RUN go mod download
 COPY *.go *.c *.sh Makefile ./
 COPY ./cmd ./cmd
 
-RUN make && go build -o bin/syso ./cmd
-
-RUN chmod u+x ./entrypoint.sh
+RUN make && chmod u+x ./entrypoint.sh
 
 CMD ["./entrypoint.sh"]

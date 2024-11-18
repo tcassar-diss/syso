@@ -37,6 +37,10 @@ struct {
 
 SEC("raw_tp/sys_enter")
 int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
+
+    // TODO: Fork following map
+    // TODO: Do something when ringbuf full: report to userspace? See if we can migigate in kernel (I don't think it's possible)
+
     pid_t calling_tgid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
   
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
