@@ -1,7 +1,10 @@
 stats/
+log/
 *-stats.json
 .idea
 bin/
 *.o
 main
-
+analyses/venv
+**/.ipynb_checkpoints
+analyses/syscalls.csv

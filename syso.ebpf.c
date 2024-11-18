@@ -41,8 +41,6 @@ struct {
 SEC("raw_tp/sys_enter")
 int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
 
-    // TODO: Fork following map
-    // TODO: Do something when ringbuf full: report to userspace? See if we can migigate in kernel (I don't think it's possible)
 
     pid_t calling_tgid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
     
@@ -66,7 +64,7 @@ int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
     if (!found)
         return 0;
     
-    bpf_map_update_elem(&follow_pid_map, &calling_tgid, &tr, BPF_NOEXIST);
+    bpf_map_update_elem(&follow_pid_map, &calling_tgid, &tr, 0);
 
     unsigned long syscall_nr = ctx->args[1];
     volatile struct pt_regs *regs;
@@ -82,7 +80,8 @@ int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
     e = bpf_ringbuf_reserve(&sc_events_map, sizeof(struct sc_event), 0);
 
     if (!e) {
-        return 0;
+        bpf_printk("ringbuf alloc failed");
+        return 1;
     }
 
     e->pid = calling_tgid;

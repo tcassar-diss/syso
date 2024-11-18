@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	ErrLim   = 50
-	StatsDir = "./stats"
+	ErrLim = 50
 )
 
 var (
@@ -113,6 +112,7 @@ func (t *tracer) Trace(binPath string, args ...string) error {
 	cmd := exec.Command(binPath, args...)
 
 	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stdout
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("executable failed to start: %w", err)
