@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/cilium/ebpf/rlimit"
+	"go.uber.org/zap"
 	"io"
 	"os"
 	"os/exec"
-
-	"github.com/cilium/ebpf/rlimit"
-	"go.uber.org/zap"
+	"os/signal"
+	"syscall"
 )
 
 const ErrLim = 50
@@ -42,15 +43,16 @@ func NewTracer(logger *zap.SugaredLogger, statsList []Stat) Tracer {
 }
 
 type tracer struct {
-	stats  []Stat
-	logger *zap.SugaredLogger
+	stats   []Stat
+	logger  *zap.SugaredLogger
+	stopper chan os.Signal
 }
 
 func (t *tracer) Trace(binPath string, args ...string) error {
 	pid := os.Getpid()
-	tgid := os.Getegid()
+	tgid := os.Getgid()
 
-	t.logger.Infow("Getting current (go) process- PID", "pid", pid)
+	t.logger.Infow("Getting current (go) process", "pid", pid, "tgid", tgid)
 
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return fmt.Errorf("failed to clear memlock: %w", err)
@@ -93,18 +95,23 @@ func (t *tracer) Trace(binPath string, args ...string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get reader to sc_events_map: %w", err)
 	}
+	defer rd.Flush()
+
+	if t.stopper == nil {
+		t.stopper = make(chan os.Signal, 1)
+	}
+	signal.Notify(t.stopper, os.Interrupt, syscall.SIGTERM)
 
 	cmd := exec.Command(binPath, args...)
 
 	cmd.Stdout = os.Stdout
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to launch application: %w", err)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("executable failed to start: %w", err)
 	}
-	defer cmd.Wait()
 
 	if err := t.listen(rd); err != nil {
-		return fmt.Errorf("failed while listening: %w", err)
+		return fmt.Errorf("listening to ring buffer failed: %w", err)
 	}
 
 	return nil
@@ -131,9 +138,20 @@ func (t *tracer) isElf(fp string) (bool, error) {
 func (t *tracer) listen(rd *ringbuf.Reader) error {
 	var event sysoScEvent
 
+	follow := make(map[int32]bool)
+
+	pid := os.Getpid()
 	failures := 0
 
+	follow[int32(pid)] = true
+
 	for {
+
+		go func() {
+			<-t.stopper
+
+			rd.Close()
+		}()
 
 		if failures > ErrLim {
 			return fmt.Errorf("%w: surpassed %d errors", ErrTooManyFailures, ErrLim)
@@ -164,12 +182,17 @@ func (t *tracer) listen(rd *ringbuf.Reader) error {
 
 		failures = 0
 
-		t.logger.Infow("sc_event recieved",
-			"pid", event.Pid,
-			"syscall_nr", event.SyscallNr,
+		if _, ok := follow[event.Ppid]; !ok {
+			continue
+		}
+
+		follow[event.Pid] = true
+
+		t.logger.Infow("hit",
 			"pc", event.Pc,
-			"dirty", event.Dirty,
-			"timestamp", event.Timestamp,
+			"syscall_nr", event.SyscallNr,
+			"(kernal) pid", event.Pid,
+			"(kernel) ppid", event.Ppid,
 		)
 	}
 

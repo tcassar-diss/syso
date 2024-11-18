@@ -14,7 +14,7 @@ import (
 
 type sysoScEvent struct {
 	Pid       int32
-	_         [4]byte
+	Ppid      int32
 	Timestamp uint64
 	SyscallNr uint64
 	Pc        uint64
@@ -70,7 +70,6 @@ type sysoProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type sysoMapSpecs struct {
-	PpidMap     *ebpf.MapSpec `ebpf:"ppid_map"`
 	ScEventsMap *ebpf.MapSpec `ebpf:"sc_events_map"`
 }
 
@@ -93,13 +92,11 @@ func (o *sysoObjects) Close() error {
 //
 // It can be passed to loadSysoObjects or ebpf.CollectionSpec.LoadAndAssign.
 type sysoMaps struct {
-	PpidMap     *ebpf.Map `ebpf:"ppid_map"`
 	ScEventsMap *ebpf.Map `ebpf:"sc_events_map"`
 }
 
 func (m *sysoMaps) Close() error {
 	return _SysoClose(
-		m.PpidMap,
 		m.ScEventsMap,
 	)
 }
