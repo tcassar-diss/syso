@@ -23,10 +23,13 @@ struct sc_event {
 
 struct sc_event *unused __attribute__((unused));
 
-// struct {
-//  __uint(type, BPF_MAP_TYPE_ARRAY);
-//  __uint(max_entries, 64);
-// } ppid_map SEC(".maps");
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(key_size, sizeof(pid_t));
+	__uint(value_size, sizeof(bool));
+	__uint(max_entries, 65535);
+	__uint(map_flags, 0);
+} follow_pid_map SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -42,18 +45,28 @@ int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
     // TODO: Do something when ringbuf full: report to userspace? See if we can migigate in kernel (I don't think it's possible)
 
     pid_t calling_tgid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
-  
+    
+    bool tr = true;
+
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task)
         return 0;
 
     struct task_struct *p_task;
+
     bpf_probe_read(&p_task, sizeof(p_task), &task->real_parent);
     if (!p_task)
         return 0;
 
-    pid_t ppid;
-    bpf_probe_read(&ppid, sizeof(ppid), &p_task->tgid);
+    pid_t p_tgid;
+    
+    bpf_probe_read(&p_tgid, sizeof(p_tgid), &p_task->tgid);
+
+    bool found = bpf_map_lookup_elem(&follow_pid_map, &p_tgid);
+    if (!found)
+        return 0;
+    
+    bpf_map_update_elem(&follow_pid_map, &calling_tgid, &tr, BPF_NOEXIST);
 
     unsigned long syscall_nr = ctx->args[1];
     volatile struct pt_regs *regs;
@@ -73,7 +86,7 @@ int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
     }
 
     e->pid = calling_tgid;
-    e->ppid = ppid;
+    e->ppid = p_tgid;
     e->timestamp = t;
     e->syscall_nr = syscall_nr;
     e->dirty = (syscall_nr == N_MMAP) || (syscall_nr == N_MUNMAP) || (syscall_nr == N_MREMAP) || (syscall_nr == N_BRK);

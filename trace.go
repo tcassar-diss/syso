@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"syscall"
 
 	"github.com/cilium/ebpf/link"
@@ -29,11 +30,11 @@ var (
 )
 
 type Stat struct {
-	SyscallNr uint64 `json:"syscall_nr,omitempty"`
-	Library   string `json:"library,omitempty"`
-	Pid       int32  `json:"pid,omitempty"`
-	Ppid      int32  `json:"ppid,omitempty"`
-	Timestamp uint64 `json:"timestamp,omitempty"`
+	SyscallNr uint64 `json:"syscall_nr"`
+	Library   string `json:"library"`
+	Pid       int32  `json:"pid"`
+	Ppid      int32  `json:"ppid"`
+	Timestamp uint64 `json:"timestamp"`
 }
 
 // Tracer gathers information about system call statistics by dynamic execution
@@ -73,10 +74,10 @@ func (t *tracer) Trace(binPath string, args ...string) error {
 		return fmt.Errorf("failed to load bpf objects: %w", err)
 	}
 
-	//err := objs.PpidMap.Put(1, pid)
-	//if err != nil {
-	//	return fmt.Errorf("failed to write pid into ppid_map: %w", err)
-	//}
+	err := objs.FollowPidMap.Put(int32(pid), true)
+	if err != nil {
+		return fmt.Errorf("failed to write pid into follow map: %w", err)
+	}
 
 	isElf, err := t.isElf(binPath)
 	if err != nil {
@@ -87,10 +88,7 @@ func (t *tracer) Trace(binPath string, args ...string) error {
 		return ErrNotElf
 	}
 
-	//// todo: do some proper path validation
-	//if binPath[:2] != "./" || binPath[:1] != "/" {
-	//	binPath = "./" + binPath
-	//}
+	_, progName := path.Split(binPath)
 
 	tp, err := link.AttachRawTracepoint(link.RawTracepointOptions{
 		Name:    "sys_enter",
@@ -125,7 +123,7 @@ func (t *tracer) Trace(binPath string, args ...string) error {
 		return fmt.Errorf("listening to ring buffer failed: %w", err)
 	}
 
-	if err := t.DumpStats(fmt.Sprintf("%s-stats.json", binPath)); err != nil {
+	if err := t.DumpStats(fmt.Sprintf("./stats/%s-stats.json", progName)); err != nil {
 		return fmt.Errorf("failed to save stats: %w", err)
 	}
 
@@ -164,12 +162,7 @@ func (t *tracer) isElf(fp string) (bool, error) {
 func (t *tracer) listen(rd *ringbuf.Reader) error {
 	var event sysoScEvent
 
-	follow := make(map[int32]bool)
-
-	pid := os.Getpid()
 	failures := 0
-
-	follow[int32(pid)] = true
 
 	for {
 		go func() {
@@ -209,12 +202,6 @@ func (t *tracer) listen(rd *ringbuf.Reader) error {
 
 		failures = 0
 
-		if _, ok := follow[event.Ppid]; !ok {
-			continue
-		}
-
-		follow[event.Pid] = true
-
 		sharedLib, err := t.maps.AssignPC(event.Pc, event.Pid, event.Dirty)
 		if err != nil {
 			t.logger.Errorw(
@@ -224,6 +211,10 @@ func (t *tracer) listen(rd *ringbuf.Reader) error {
 				"ppid", event.Ppid,
 				"err", err,
 			)
+		}
+
+		if sharedLib == "" {
+			sharedLib = "FAILED"
 		}
 
 		t.stats = append(t.stats, Stat{
