@@ -28,9 +28,10 @@ COPY go.mod go.sum ./
 
 RUN go mod download
 
-COPY cmd/* *.go *.c *.sh ./
+COPY *.go *.c *.sh Makefile ./
+COPY ./cmd ./cmd
 
-RUN go generate && go build -o bin/syso ./cmd
+RUN make && go build -o bin/syso ./cmd
 
 RUN chmod u+x ./entrypoint.sh
 
