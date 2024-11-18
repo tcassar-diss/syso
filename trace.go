@@ -19,9 +19,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	ErrLim = 50
-)
+const ErrLim = 50
 
 var (
 	ErrNotElf          = errors.New("not an elf")
