@@ -1,7 +1,6 @@
 FROM ubuntu:22.04
 
-ARG GOVERSION=1.32.1
-ARG ARCH=amd64
+ARG KERNEL_VERSION=6.8.0-45-generic 
 
 RUN apt update -y && apt upgrade -y && \
     apt install -y \
@@ -12,10 +11,10 @@ RUN apt update -y && apt upgrade -y && \
     libelf-dev \
     golang-1.23 \
     ca-certificates \
-    linux-headers-"$(uname -r)" \
+    linux-headers-${KERNEL_VERSION} \
     linux-tools-common \
     linux-tools-generic \
-    linux-tools-$(uname -r)
+    linux-tools-${KERNEL_VERSION}
 
 ENV PATH="/usr/lib/go-1.23/bin:${PATH}"
 
