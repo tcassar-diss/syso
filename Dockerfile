@@ -33,4 +33,6 @@ COPY main.go main.c entrypoint.sh Makefile ./
 
 RUN make && chmod u+x ./entrypoint.sh
 
+RUN sysctl kernel.randomize_va_space=0
+
 CMD ["./entrypoint.sh"]
