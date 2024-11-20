@@ -17,6 +17,7 @@ type MemMap struct {
 	AddrStart uint64
 	AddrEnd   uint64
 	PathName  string
+	// todo: offset
 }
 
 func (m *MemMap) contains(addr uint64) bool {

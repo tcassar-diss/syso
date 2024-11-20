@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 	"os"
-	
-	"github.com/tcassar-diss/syso"
+
+	"github.com/tcassar-diss/syso/syso"
 	"go.uber.org/zap"
 )
 

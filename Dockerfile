@@ -27,8 +27,9 @@ COPY go.mod go.sum ./
 
 RUN go mod download
 
-COPY *.go *.c *.sh Makefile ./
-COPY ./cmd ./cmd
+COPY ./bpf ./bpf
+COPY ./syso ./syso
+COPY main.go main.c entrypoint.sh Makefile ./
 
 RUN make && chmod u+x ./entrypoint.sh
 

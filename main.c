@@ -8,7 +8,7 @@ int main(int argc, char** argv) {
 
    fork();
 
-    sleep(1);
+   sleep(1);
 
    printf("%s %s\n", argv[1], argv[2]);
 

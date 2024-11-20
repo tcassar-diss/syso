@@ -1,4 +1,4 @@
-syso: syso.ebpf.c sample trace
+syso: ./bpf/syso.ebpf.c sample trace
 
 clean:
 	rm bin/* main
@@ -6,9 +6,13 @@ clean:
 sample: ./main.c
 	gcc -o main ./main.c
 
-trace: ./cmd/trace
+trace: ./main.go
 	go generate
-	go build -o bin/syso ./cmd/trace
+	go build -o bin/syso .
 
-maps: ./cmd/maps
-	go build -o bin/main ./cmd/maps
+vmlinux.h: /usr/include/x86_64-linux-gnu/asm $(which bpftool)
+	ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm && \
+    bpftool btf dump file /sys/kernel/btf/vmlinux format c > ./bpf/vmlinux.h
+
+
+

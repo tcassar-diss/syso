@@ -38,5 +38,4 @@ make
 - Fails to assign mappings for short lived forks (work in progess)
 - No checks on ring buffer being full (also work in progress)
 - Need to manually ctrl-c when executable finishes (also work in progress)
-- Doesn't work in Docker container as PIDs in containers are namespaced differently to the host, which makes things less trivial.
 
