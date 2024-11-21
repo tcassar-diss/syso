@@ -29,10 +29,8 @@ RUN go mod download
 
 COPY ./bpf ./bpf
 COPY ./syso ./syso
-COPY main.go main.c entrypoint.sh Makefile ./
+COPY main.go main.c Makefile ./
 
-RUN make && chmod u+x ./entrypoint.sh
+RUN make && sysctl kernel.randomize_va_space=0
 
-RUN sysctl kernel.randomize_va_space=0
-
-CMD ["./entrypoint.sh"]
+ENTRYPOINT ["./bin/syso"]

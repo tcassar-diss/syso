@@ -17,13 +17,14 @@
 
 ```shell
 docker build . -t syso 
-docker run --privileged --pid=host -it -v ./stats:/app/stats syso
+docker run -it --privileged --pid=host -v ./stats:/app/stats syso ./main hello world
 ```
 
 - Command breakdown
-    - `--priviliged`: needed to disable aslr and to attach bpf program onto the host kernel
+    - `--priviliged`: needed to attach bpf program onto the host kernel
     - `--pid=host`: force kernel and userspace frontend (running in the container) to associate the same processes with the same PIDs
     - `-v ./stats:/app/stats`: comprensive stats file is written to /app/stats as json.
+    - `./main hello world` program + args being analysed
 
 
 ### Host
