@@ -51,6 +51,8 @@ int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
     pid_t calling_tgid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
     
     const bool tr = true;
+    const bool fs = false;
+    int index = 0;
 
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task)
@@ -86,10 +88,14 @@ int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
     e = bpf_ringbuf_reserve(&sc_events_map, sizeof(struct sc_event), 0);
 
     if (!e) {
-        int index = 0;
+        
         bpf_map_update_elem(&sc_events_full_map, &index, &tr, 0);
         return 1;
     }
+
+    bool marked_full_atm = bpf_map_lookup_elem(&sc_events_full_map, &index);
+    if (marked_full_atm)
+        bpf_map_update_elem(&sc_events_full_map, &index, &fs, 0);
 
     e->pid = calling_tgid;
     e->ppid = p_tgid;
