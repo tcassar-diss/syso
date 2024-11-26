@@ -36,6 +36,14 @@ struct {
     __uint(max_entries, 1048576);
 } sc_events_map SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(key_size, sizeof(int32));
+    __uint(value_size, sizeof(bool));
+    __uint(max_entries, 1);
+    __uint(map_flags, 0);
+} sc_events_full_map SEC(".maps");
+
 // Guide for raw tracepoint handling: https://mozillazg.com/2022/05/ebpf-libbpf-raw-tracepoint-common-questions-en.html
 
 SEC("raw_tp/sys_enter")
@@ -78,7 +86,8 @@ int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
     e = bpf_ringbuf_reserve(&sc_events_map, sizeof(struct sc_event), 0);
 
     if (!e) {
-        bpf_printk("ringbuf alloc failed");
+        int index = 0;
+        bpf_map_update_elem(&sc_events_full_map, &index, &tr, 0);
         return 1;
     }
 

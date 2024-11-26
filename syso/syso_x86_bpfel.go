@@ -70,8 +70,9 @@ type sysoProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type sysoMapSpecs struct {
-	FollowPidMap *ebpf.MapSpec `ebpf:"follow_pid_map"`
-	ScEventsMap  *ebpf.MapSpec `ebpf:"sc_events_map"`
+	FollowPidMap    *ebpf.MapSpec `ebpf:"follow_pid_map"`
+	ScEventsFullMap *ebpf.MapSpec `ebpf:"sc_events_full_map"`
+	ScEventsMap     *ebpf.MapSpec `ebpf:"sc_events_map"`
 }
 
 // sysoObjects contains all objects after they have been loaded into the kernel.
@@ -93,13 +94,15 @@ func (o *sysoObjects) Close() error {
 //
 // It can be passed to loadSysoObjects or ebpf.CollectionSpec.LoadAndAssign.
 type sysoMaps struct {
-	FollowPidMap *ebpf.Map `ebpf:"follow_pid_map"`
-	ScEventsMap  *ebpf.Map `ebpf:"sc_events_map"`
+	FollowPidMap    *ebpf.Map `ebpf:"follow_pid_map"`
+	ScEventsFullMap *ebpf.Map `ebpf:"sc_events_full_map"`
+	ScEventsMap     *ebpf.Map `ebpf:"sc_events_map"`
 }
 
 func (m *sysoMaps) Close() error {
 	return _SysoClose(
 		m.FollowPidMap,
+		m.ScEventsFullMap,
 		m.ScEventsMap,
 	)
 }

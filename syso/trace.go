@@ -2,6 +2,7 @@ package syso
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -10,8 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path"
 	"syscall"
+	"time"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
@@ -19,209 +20,182 @@ import (
 	"go.uber.org/zap"
 )
 
-const ErrLim = 50
+const BPFTimeoutDur = 1 * time.Second
 
 var (
-	ErrNotElf          = errors.New("not an elf")
-	ErrTooManyFailures = errors.New("failed to read from ringbuffer too many times in a row")
+	ErrRingbufFull    = errors.New("ringbuffer full")
+	ErrStatSaveFailed = errors.New("failed to save stat")
+	ErrReadTimeout    = errors.New("bpf read timeout exceeded")
+
+	rbfIndex = int32(1)
 )
 
-type Stat struct {
-	SyscallNr uint64 `json:"syscall_nr"`
-	Library   string `json:"library"`
-	Pid       int32  `json:"pid"`
-	Ppid      int32  `json:"ppid"`
-	Timestamp uint64 `json:"timestamp"`
-}
-
-// Tracer gathers information about system call statistics by dynamic execution
-type Tracer interface {
-	// Trace records all system calls for the given executable and its arguments
-	Trace(binPath string, args ...string) error
-	DumpStats(fp string) error
-}
-
-func NewTracer(logger *zap.SugaredLogger, statsList []Stat) Tracer {
-	return &tracer{
-		logger: logger,
-		stats:  statsList,
-		maps:   NewProcMaps(logger),
-	}
-}
-
-type tracer struct {
+type Tracer struct {
 	logger  *zap.SugaredLogger
-	maps    ProcMaps
-	stopper chan os.Signal
-	stats   []Stat
+	output  io.Writer
+	maps    *ProcMaps
+	objects *sysoObjects
 }
 
-func (t *tracer) Trace(binPath string, args ...string) error {
-	pid := os.Getpid()
-	tgid := os.Getgid()
-
-	t.logger.Infow("Getting current (go) process", "pid", pid, "tgid", tgid)
-
+// NewTracer configures a tracer to monitor application syscalls.
+func NewTracer(logger *zap.SugaredLogger, output io.Writer, maps *ProcMaps) (*Tracer, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
-		return fmt.Errorf("failed to clear memlock: %w", err)
+		return nil, fmt.Errorf("failed to clear memlock: %w", err)
 	}
 
-	var objs sysoObjects
-	if err := loadSysoObjects(&objs, nil); err != nil {
-		return fmt.Errorf("failed to load bpf objects: %w", err)
+	t := Tracer{
+		logger:  logger,
+		output:  output,
+		maps:    maps,
+		objects: &sysoObjects{},
 	}
 
-	err := objs.FollowPidMap.Put(int32(pid), true)
-	if err != nil {
-		return fmt.Errorf("failed to write pid into follow map: %w", err)
+	if err := loadSysoObjects(t.objects, nil); err != nil {
+		return nil, fmt.Errorf("failed to load bpf objects: %w", err)
 	}
 
-	isElf, err := t.isElf(binPath)
-	if err != nil {
-		return fmt.Errorf("failed to check if file is an ELF: %w", err)
+	return &t, nil
+}
+
+// Trace will trace system calls that happen when executing the executable.
+func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) error {
+	t.logger.Infow("tracing program execution", "executable", executable)
+
+	pid := os.Getpid()
+
+	if err := t.objects.FollowPidMap.Put(int32(pid), true); err != nil {
+		return fmt.Errorf("failed to register pid into follow map: %w", err)
 	}
 
-	if !isElf {
-		return ErrNotElf
+	if err := t.objects.ScEventsFullMap.Put(&rbfIndex, false); err != nil {
+		return fmt.Errorf("failed to register ringbuf empty: %w", err)
 	}
-
-	_, progName := path.Split(binPath)
 
 	tp, err := link.AttachRawTracepoint(link.RawTracepointOptions{
 		Name:    "sys_enter",
-		Program: objs.sysoPrograms.RawTpSysEnter,
+		Program: t.objects.sysoPrograms.RawTpSysEnter,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to attack to raw tracepoint: %w", err)
 	}
 	defer tp.Close()
 
-	rd, err := ringbuf.NewReader(objs.ScEventsMap)
+	rd, err := ringbuf.NewReader(t.objects.ScEventsMap)
 	if err != nil {
 		return fmt.Errorf("failed to get reader to sc_events_map: %w", err)
 	}
 	defer rd.Close()
 
-	if t.stopper == nil {
-		t.stopper = make(chan os.Signal, 1)
-	}
-	signal.Notify(t.stopper, os.Interrupt, syscall.SIGTERM)
+	stopper := make(chan os.Signal)
+	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
 
-	cmd := exec.Command(binPath, args...)
+	cmd := exec.Command(executable, args...)
 
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("executable failed to start: %w", err)
+		return fmt.Errorf("failed to start executable: %w", err)
 	}
 	defer cmd.Wait()
 
-	if err := t.listen(rd); err != nil {
-		return fmt.Errorf("listening to ring buffer failed: %w", err)
-	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			rd.Close()
+			t.logger.Infow("context cancelled: exiting...")
+		case interrupt := <-stopper:
+			rd.Close()
+			t.logger.Infow("received interrupt: exiting...", "interrupt", interrupt)
+		}
+	}()
 
-	if err := t.DumpStats(fmt.Sprintf("./stats/%s-stats.json", progName)); err != nil {
-		return fmt.Errorf("failed to save stats: %w", err)
-	}
-
-	return nil
+	return t.listen(rd)
 }
 
-func (t *tracer) DumpStats(fp string) error {
-	t.logger.Infow("writing stats to file", "fp", fp)
-
-	bts, err := json.Marshal(t.stats)
-	if err != nil {
-		return fmt.Errorf("failed to marshall stats: %w", err)
-	}
-
-	if err := os.WriteFile(fp, bts, 0x777); err != nil {
-		return fmt.Errorf("failed to write to file: %w", err)
-	}
-
-	return nil
-}
-
-func (t *tracer) isElf(fp string) (bool, error) {
-	f, err := os.Open(fp)
-	if err != nil {
-		return false, fmt.Errorf("failed to open file: %w", err)
-	}
-
-	bts, err := io.ReadAll(io.LimitReader(f, 32))
-	if err != nil {
-		return false, fmt.Errorf("failed to parse first 32 bytes of executable: %w", err)
-	}
-
-	return "ELF" == string(bts[1:4]), nil
-}
-
-func (t *tracer) listen(rd *ringbuf.Reader) error {
+func (t *Tracer) listen(rd *ringbuf.Reader) error {
 	var event sysoScEvent
-
-	failures := 0
+	prevD := time.Now()
+	d := time.Now()
 
 	for {
-		go func() {
-			<-t.stopper
+		var ringbufFull bool
+		if err := t.objects.ScEventsFullMap.Lookup(&rbfIndex, &ringbufFull); err != nil {
+			return fmt.Errorf("failed to check if ringbuffer is full: %w", err)
+		}
 
-			rd.Close()
-		}()
-
-		if failures > ErrLim {
-			return fmt.Errorf("%w: surpassed %d errors", ErrTooManyFailures, ErrLim)
+		if ringbufFull {
+			return ErrRingbufFull
 		}
 
 		record, err := rd.Read()
+		if errors.Is(err, ringbuf.ErrClosed) {
+			t.logger.Info("ringbuffer closed, exiting...")
+
+			break
+		}
 		if err != nil {
-			if errors.Is(err, ringbuf.ErrClosed) {
-				t.logger.Infow("ring buffer closed; exiting...")
-
-				failures++
-
-				break
-			}
-
-			t.logger.Errorw("failed to read from record", "err", err)
-
-			failures++
+			t.logger.Infow("read from bpf map failed", "err", err)
 
 			continue
 		}
+
+		d = time.Now()
+
+		if d.Sub(prevD) > BPFTimeoutDur {
+			return ErrReadTimeout
+		}
+
+		prevD = d
 
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
-			t.logger.Errorw("failed to read from ringbuffer", "err", err)
-
-			failures++
-
-			continue
+			return fmt.Errorf("failed to parse binary from bpf map: %w", err)
 		}
 
-		failures = 0
-
-		sharedLib, err := t.maps.AssignPC(event.Pc, event.Pid, event.Dirty)
-		if err != nil {
-			t.logger.Errorw(
-				"failed to assign pc to shared library: ",
-				"pc", event.Pc,
-				"pid", event.Pid,
-				"ppid", event.Ppid,
-				"err", err,
-			)
+		if err := t.Report(event); err != nil {
+			return fmt.Errorf("failed to report event: %w", err)
 		}
+	}
 
-		if sharedLib == "" {
-			sharedLib = "FAILED"
-		}
+	return nil
+}
 
-		t.stats = append(t.stats, Stat{
-			SyscallNr: event.SyscallNr,
-			Library:   sharedLib,
-			Pid:       event.Pid,
-			Ppid:      event.Ppid,
-			Timestamp: event.Timestamp,
-		})
+func (t *Tracer) Report(event sysoScEvent) error {
+	sharedLib, err := t.maps.AssignPC(event.Pc, event.Pid, event.Dirty)
+	if err != nil {
+		t.logger.Errorw(
+			"failed to assign pc to shared library: ",
+			"pc", event.Pc,
+			"pid", event.Pid,
+			"ppid", event.Ppid,
+			"err", err,
+		)
+	}
+
+	if sharedLib == "" {
+		sharedLib = "FAILED"
+	}
+
+	stat := Stat{
+		SyscallNr: event.SyscallNr,
+		Library:   sharedLib,
+		Pid:       event.Pid,
+		Ppid:      event.Ppid,
+		Timestamp: event.Timestamp,
+	}
+
+	bts, err := json.Marshal(stat)
+	if err != nil {
+		return fmt.Errorf("failed to marshal stat to json: %w", err)
+	}
+
+	n, err := t.output.Write(bts)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrStatSaveFailed, err)
+	}
+
+	if n != len(bts) {
+		return fmt.Errorf("%w: bits written (%d) != bits to write (%d)", n, len(bts))
 	}
 
 	return nil

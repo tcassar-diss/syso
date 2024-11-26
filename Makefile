@@ -7,7 +7,7 @@ sample: ./main.c
 	gcc -o main ./main.c
 
 trace: ./main.go
-	go generate
+	go generate ./...
 	go build -o bin/syso .
 
 vmlinux.h: /usr/include/x86_64-linux-gnu/asm $(which bpftool)
