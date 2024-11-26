@@ -40,11 +40,9 @@ struct {
 
 SEC("raw_tp/sys_enter")
 int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
-
-
     pid_t calling_tgid = bpf_get_current_pid_tgid() & 0xFFFFFFFF;
     
-    bool tr = true;
+    const bool tr = true;
 
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task)
