@@ -60,7 +60,7 @@ func v2() {
 	tracer, err := syso.NewTracer(logger, f, &maps)
 	_, err = syso.NewTracer(logger, f, &maps)
 	if err != nil {
-		logger.Fatalw("are you root? failed to create tracer", "err", err)
+		logger.Fatalw("failed to create tracer", "err", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

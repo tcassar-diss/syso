@@ -7,27 +7,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/ringbuf"
+	"github.com/cilium/ebpf/rlimit"
+	"go.uber.org/zap"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
-	"time"
-
-	"github.com/cilium/ebpf/link"
-	"github.com/cilium/ebpf/ringbuf"
-	"github.com/cilium/ebpf/rlimit"
-	"go.uber.org/zap"
 )
-
-const BPFTimeoutDur = 1 * time.Second
 
 var (
 	ErrRingbufFull    = errors.New("ringbuffer full")
 	ErrStatSaveFailed = errors.New("failed to save stat")
 	ErrReadTimeout    = errors.New("bpf read timeout exceeded")
 
-	rbfIndex = int32(1)
+	rbfIndex = int32(0)
 )
 
 type Tracer struct {
@@ -115,8 +111,6 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 
 func (t *Tracer) listen(rd *ringbuf.Reader) error {
 	var event sysoScEvent
-	prevD := time.Now()
-	d := time.Now()
 
 	for {
 		var ringbufFull bool
@@ -139,14 +133,6 @@ func (t *Tracer) listen(rd *ringbuf.Reader) error {
 
 			continue
 		}
-
-		d = time.Now()
-
-		if d.Sub(prevD) > BPFTimeoutDur {
-			return ErrReadTimeout
-		}
-
-		prevD = d
 
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
 			return fmt.Errorf("failed to parse binary from bpf map: %w", err)
