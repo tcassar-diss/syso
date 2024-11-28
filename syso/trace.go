@@ -108,6 +108,9 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	eventsChan := make(chan sysoScEvent, 512)
 	defer close(eventsChan)
 
+	rbFullChan := make(chan struct{})
+	defer close(rbFullChan)
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start executable: %w", err)
 	}
@@ -130,10 +133,42 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 
 	group.Go(
 		func() error {
-			return t.listen(ctx, eventsChan)
+			return t.monitorScEventsFull(ctx, rbFullChan)
+		})
+
+	group.Go(
+		func() error {
+			return t.listen(ctx, eventsChan, rbFullChan)
 		})
 
 	return group.Wait()
+}
+
+func (t *Tracer) monitorScEventsFull(ctx context.Context, rbFullChan chan struct{}) error {
+	var ringbufFull bool
+
+	prevFull := false
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		prevFull = ringbufFull
+
+		if err := t.objects.ScEventsFullMap.Lookup(&rbfIndex, &ringbufFull); err != nil {
+			return fmt.Errorf("failed to check if ringbuffer is full: %w", err)
+		}
+
+		if !ringbufFull || ringbufFull && prevFull {
+			continue
+		}
+
+		// only send when state changes from "not full" to "full" to avoid cluttering stats
+		rbFullChan <- struct{}{}
+	}
 }
 
 func (t *Tracer) monitorScEvents(ctx context.Context, rd *ringbuf.Reader, eventsChan chan sysoScEvent) error {
@@ -143,8 +178,6 @@ func (t *Tracer) monitorScEvents(ctx context.Context, rd *ringbuf.Reader, events
 		select {
 		case <-ctx.Done():
 			rd.Close()
-
-			t.logger.Info("context cancelled, closing ringbuffer")
 		default:
 		}
 
@@ -165,7 +198,7 @@ func (t *Tracer) monitorScEvents(ctx context.Context, rd *ringbuf.Reader, events
 	}
 }
 
-func (t *Tracer) listen(ctx context.Context, eventsChan chan sysoScEvent) error {
+func (t *Tracer) listen(ctx context.Context, eventsChan chan sysoScEvent, rbFullChan chan struct{}) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -176,22 +209,11 @@ func (t *Tracer) listen(ctx context.Context, eventsChan chan sysoScEvent) error 
 			if err := t.reportEvent(event); err != nil {
 				return fmt.Errorf("failed to report event: %w", err)
 			}
-		default:
-		}
-
-		var ringbufFull bool
-		if err := t.objects.ScEventsFullMap.Lookup(&rbfIndex, &ringbufFull); err != nil {
-			return fmt.Errorf("failed to check if ringbuffer is full: %w", err)
-		}
-
-		if ringbufFull {
+		case <-rbFullChan:
 			if err := t.reportMissedStat(); err != nil {
 				return fmt.Errorf("failed to report missed stat: %w", err)
 			}
-
-			continue
 		}
-
 	}
 }
 
