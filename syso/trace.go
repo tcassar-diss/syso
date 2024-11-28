@@ -39,10 +39,12 @@ var (
 )
 
 type Tracer struct {
-	logger  *zap.SugaredLogger
-	output  io.Writer
-	maps    *ProcMaps
-	objects *sysoObjects
+	logger    *zap.SugaredLogger
+	output    io.Writer
+	maps      *ProcMaps
+	objects   *sysoObjects
+	startTime int64  // unix time
+	firstStat uint64 // ktime (nanoseconds since boot)
 }
 
 // NewTracer configures a tracer to monitor application syscalls.
@@ -119,15 +121,16 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	var group errgroup.Group
 
 	group.Go(func() error {
-		interrupt := <-stopper
+		<-stopper
 		cancel()
 		rd.Close()
-		t.logger.Infow("received interrupt: exiting...", "interrupt", interrupt)
+		t.logger.Infow("received interrupt: exiting...")
 		return nil
 	})
 
 	group.Go(
 		func() error {
+			t.startTime = time.Now().UnixNano()
 			return t.monitorScEvents(ctx, rd, eventsChan)
 		})
 
@@ -162,7 +165,7 @@ func (t *Tracer) monitorScEventsFull(ctx context.Context, rbFullChan chan struct
 			return fmt.Errorf("failed to check if ringbuffer is full: %w", err)
 		}
 
-		if !ringbufFull || ringbufFull && prevFull {
+		if !ringbufFull || (ringbufFull && prevFull) {
 			continue
 		}
 
@@ -218,6 +221,10 @@ func (t *Tracer) listen(ctx context.Context, eventsChan chan sysoScEvent, rbFull
 }
 
 func (t *Tracer) reportEvent(event sysoScEvent) error {
+	if t.firstStat == 0 {
+		t.firstStat = event.Timestamp
+	}
+
 	sharedLib, err := t.maps.AssignPC(event.Pc, event.Pid, event.Dirty)
 	if err != nil {
 		t.logger.Errorw(
@@ -261,9 +268,6 @@ func (t *Tracer) reportStat(stat Stat) error {
 }
 
 func (t *Tracer) reportMissedStat() error {
-	// todo: this is wall clock time, whereas bpf reports in time since boot.
-	//  this is fine for now (ish) as it still provides facilities to calculate downtime.
-
 	// may seem strange to get a timestamp in userspace: why cant this be done in the kernel?
 	//
 	// tracing programs don't support spinlocking yet, so can't safely update timestamps in a BPF_MAP_TYPE_HASH.
@@ -272,7 +276,8 @@ func (t *Tracer) reportMissedStat() error {
 	// note: not a problem with ring buffers as ring buffers guarantee event ordering to be preserved.
 	now := time.Now().UnixNano()
 
-	missedStat.Timestamp = uint64(now)
+	// estimate ktime
+	missedStat.Timestamp = t.firstStat + uint64(now-t.startTime)
 
 	return t.reportStat(missedStat)
 }

@@ -88,7 +88,6 @@ int raw_tp_sys_enter(struct bpf_raw_tracepoint_args *ctx) {
     e = bpf_ringbuf_reserve(&sc_events_map, sizeof(struct sc_event), 0);
 
     if (!e) {
-        
         bpf_map_update_elem(&sc_events_full_map, &index, &tr, 0);
         return 1;
     }
