@@ -18,6 +18,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 type Stat struct {
@@ -93,57 +94,91 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	}
 	defer rd.Close()
 
-	stopper := make(chan os.Signal)
-	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
-
 	cmd := exec.Command(executable, args...)
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	stopper := make(chan os.Signal)
+	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	eventsChan := make(chan sysoScEvent, 512)
+	defer close(eventsChan)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start executable: %w", err)
 	}
 	defer cmd.Wait()
 
-	go func() {
-		select {
-		case <-ctx.Done():
-			rd.Close()
-			t.logger.Infow("context cancelled: exiting...")
-		case interrupt := <-stopper:
-			rd.Close()
-			t.logger.Infow("received interrupt: exiting...", "interrupt", interrupt)
-		}
-	}()
+	var group errgroup.Group
 
-	return t.listen(rd)
+	group.Go(func() error {
+		interrupt := <-stopper
+		cancel()
+		rd.Close()
+		t.logger.Infow("received interrupt: exiting...", "interrupt", interrupt)
+		return nil
+	})
+
+	group.Go(
+		func() error {
+			return t.monitorScEvents(ctx, rd, eventsChan)
+		})
+
+	group.Go(
+		func() error {
+			return t.listen(ctx, eventsChan)
+		})
+
+	return group.Wait()
 }
 
-func (t *Tracer) listen(rd *ringbuf.Reader) error {
+func (t *Tracer) monitorScEvents(ctx context.Context, rd *ringbuf.Reader, eventsChan chan sysoScEvent) error {
 	var event sysoScEvent
 
 	for {
+		select {
+		case <-ctx.Done():
+			rd.Close()
+
+			t.logger.Info("context cancelled, closing ringbuffer")
+		default:
+		}
+
 		record, err := rd.Read()
 		if errors.Is(err, ringbuf.ErrClosed) {
 			t.logger.Info("ringbuffer closed, exiting...")
 
-			break
-		}
-		if err != nil {
-			t.logger.Errorw("read from bpf map failed", "err", err)
-
-			continue
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("failed to read from ringbuffer: %w", err)
 		}
 
-		// might seem strange to read before checking if full.
-		// reason being is this loop only quits when ring buffer is closed.
-		// only find out that the ring buffer is closed when we try to read.
-		// if the check was first, the ring buffer was closed while full, then we would never check to see if the
-		// ring buffer was closed and would be in an infinite loop!
+		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
+			return fmt.Errorf("failed to parse binary from bpf map: %w", err)
+		}
 
-		// note: this approach of missing stats will not indicate how many syscalls are missed
-		// analyses should be careful to worry about the DOWNTIME, not the raw number of missedStats reported.
+		eventsChan <- event
+	}
+}
+
+func (t *Tracer) listen(ctx context.Context, eventsChan chan sysoScEvent) error {
+	for {
+		select {
+		case <-ctx.Done():
+			t.logger.Infow("trace finished", "timestamp", time.Now().UnixNano())
+
+			return nil
+		case event := <-eventsChan:
+			if err := t.reportEvent(event); err != nil {
+				return fmt.Errorf("failed to report event: %w", err)
+			}
+		default:
+		}
+
 		var ringbufFull bool
 		if err := t.objects.ScEventsFullMap.Lookup(&rbfIndex, &ringbufFull); err != nil {
 			return fmt.Errorf("failed to check if ringbuffer is full: %w", err)
@@ -157,20 +192,7 @@ func (t *Tracer) listen(rd *ringbuf.Reader) error {
 			continue
 		}
 
-		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &event); err != nil {
-			return fmt.Errorf("failed to parse binary from bpf map: %w", err)
-		}
-
-		if err := t.reportEvent(event); err != nil {
-			return fmt.Errorf("failed to report event: %w", err)
-		}
 	}
-
-	// log when we finished, so that if we finished with the ringbuffer full we can still compute
-	// downtime
-	t.logger.Infow("trace finished", "timestamp", time.Now().UnixNano())
-
-	return nil
 }
 
 func (t *Tracer) reportEvent(event sysoScEvent) error {
@@ -219,6 +241,13 @@ func (t *Tracer) reportStat(stat Stat) error {
 func (t *Tracer) reportMissedStat() error {
 	// todo: this is wall clock time, whereas bpf reports in time since boot.
 	//  this is fine for now (ish) as it still provides facilities to calculate downtime.
+
+	// may seem strange to get a timestamp in userspace: why cant this be done in the kernel?
+	//
+	// tracing programs don't support spinlocking yet, so can't safely update timestamps in a BPF_MAP_TYPE_HASH.
+	// since just an estimate is required, this is fine: if it becomes a problem, can change later.
+	//
+	// note: not a problem with ring buffers as ring buffers guarantee event ordering to be preserved.
 	now := time.Now().UnixNano()
 
 	missedStat.Timestamp = uint64(now)
