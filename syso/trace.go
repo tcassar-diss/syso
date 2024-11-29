@@ -40,7 +40,7 @@ var (
 
 type Tracer struct {
 	logger    *zap.SugaredLogger
-	output    io.Writer
+	output    io.WriteSeeker
 	maps      *ProcMaps
 	objects   *sysoObjects
 	startTime int64  // unix time
@@ -48,7 +48,7 @@ type Tracer struct {
 }
 
 // NewTracer configures a tracer to monitor application syscalls.
-func NewTracer(logger *zap.SugaredLogger, output io.Writer, maps *ProcMaps) (*Tracer, error) {
+func NewTracer(logger *zap.SugaredLogger, output io.WriteSeeker, maps *ProcMaps) (*Tracer, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return nil, fmt.Errorf("failed to clear memlock: %w", err)
 	}
@@ -69,6 +69,10 @@ func NewTracer(logger *zap.SugaredLogger, output io.Writer, maps *ProcMaps) (*Tr
 
 // Trace will trace system calls that happen when executing the executable.
 func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) error {
+	if _, err := t.output.Write([]byte("[")); err != nil {
+		return fmt.Errorf("failed to write to output: %w", err)
+	}
+
 	t.logger.Infow("tracing program execution", "executable", executable)
 
 	pid := os.Getpid()
@@ -144,7 +148,19 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 			return t.listen(ctx, eventsChan, rbFullChan)
 		})
 
-	return group.Wait()
+	if err := group.Wait(); err != nil {
+		return err
+	}
+
+	if _, err := t.output.Seek(-1, io.SeekEnd); err != nil {
+		return fmt.Errorf("failed to seek back a byte: %w", err)
+	}
+
+	if _, err := t.output.Write([]byte("]")); err != nil {
+		return fmt.Errorf("failed to write closing bracket")
+	}
+
+	return nil
 }
 
 func (t *Tracer) monitorScEventsFull(ctx context.Context, rbFullChan chan struct{}) error {
@@ -262,6 +278,10 @@ func (t *Tracer) reportStat(stat Stat) error {
 
 	if n != len(bts) {
 		return fmt.Errorf("%w: bits written (%d) != bits to write (%d)", n, len(bts))
+	}
+
+	if _, err := t.output.Write([]byte(",")); err != nil {
+		return fmt.Errorf("failed to add comma: %w", err)
 	}
 
 	return nil
