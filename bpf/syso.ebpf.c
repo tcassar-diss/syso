@@ -33,7 +33,7 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1048576);
+    __uint(max_entries, 4194304);
 } sc_events_map SEC(".maps");
 
 struct {
