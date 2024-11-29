@@ -26,6 +26,7 @@ func main() {
 	}
 
 	maps := syso.NewProcMaps(logger)
+	defer maps.Close()
 
 	executable := os.Args[1]
 	args := os.Args[2:]
@@ -38,6 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create output file")
 	}
+	defer f.Close()
 
 	tracer, err := syso.NewTracer(logger, f, &maps)
 	_, err = syso.NewTracer(logger, f, &maps)

@@ -16,8 +16,8 @@ const debug = false
 type MemMap struct {
 	AddrStart uint64
 	AddrEnd   uint64
+	Offset    uint64
 	PathName  string
-	// todo: offset
 }
 
 func (m *MemMap) contains(addr uint64) bool {
@@ -102,9 +102,15 @@ func (p ProcMaps) ByPID(pid int32, dirty bool) ([]*MemMap, error) {
 			return nil, fmt.Errorf("failed to parse end of address range: %w", err)
 		}
 
+		offset, err := strconv.ParseUint(fields[2], 16, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse offset: %w", err)
+		}
+
 		p.maps[pid] = append(p.maps[pid], &MemMap{
 			AddrStart: addrStart,
 			AddrEnd:   addrEnd,
+			Offset:    offset,
 			PathName:  fields[len(fields)-1],
 		})
 	}
@@ -130,7 +136,7 @@ func (p ProcMaps) AssignPC(pc uint64, pid int32, dirty bool) (string, error) {
 	}
 
 	for _, m := range mmap {
-		if !m.contains(pc) {
+		if !m.contains(pc - m.Offset) {
 			continue
 		}
 
