@@ -136,12 +136,14 @@ func (p ProcMaps) AssignPC(pc uint64, pid int32, dirty bool) (string, error) {
 	}
 
 	for _, m := range mmap {
-		if !m.contains(pc - m.Offset) {
+		if !m.contains(pc) {
 			continue
 		}
 
 		return m.PathName, nil
 	}
 
-	return "unmapped", nil
+	// if there was no mapping associated with [stack], [heap], or a shared library,
+	// the call must have come from an anonymously mapped space
+	return "anonymous", nil
 }
