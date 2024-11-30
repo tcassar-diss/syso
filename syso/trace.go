@@ -29,22 +29,27 @@ type Stat struct {
 	Timestamp uint64 `json:"timestamp"`
 }
 
-var missedStat = Stat{Library: "MISSED_BUFFER_FULL"}
+type MissedStats struct {
+	RingBufFull     uint64 `json:"ringbuf_full"`
+	GetParentFailed uint64 `json:"get_parent_failed"`
+	GetPTRegsFailed uint64 `json:"get_pt_regs_failed"`
+}
+
+// TODO: figure out some way to have this generated from the macro in bpf/syso.bpf.c
+const nSysoFailureTypes = 3
 
 var (
 	ErrStatSaveFailed = errors.New("failed to save stat")
 	ErrReadTimeout    = errors.New("bpf read timeout exceeded")
-
-	rbfIndex = int32(0)
 )
 
+var commaNeeded bool
+
 type Tracer struct {
-	logger    *zap.SugaredLogger
-	output    io.WriteSeeker
-	maps      *ProcMaps
-	objects   *sysoObjects
-	startTime int64  // unix time
-	firstStat uint64 // ktime (nanoseconds since boot)
+	logger  *zap.SugaredLogger
+	output  io.WriteSeeker
+	maps    *ProcMaps
+	objects *sysoObjects
 }
 
 // NewTracer configures a tracer to monitor application syscalls.
@@ -75,14 +80,12 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 
 	t.logger.Infow("tracing program execution", "executable", executable)
 
-	pid := os.Getpid()
-
-	if err := t.objects.FollowPidMap.Put(int32(pid), true); err != nil {
-		return fmt.Errorf("failed to register pid into follow map: %w", err)
+	if err := t.initFollowMap(); err != nil {
+		return fmt.Errorf("failed to initialise follow map: %w", err)
 	}
 
-	if err := t.objects.ScEventsFullMap.Put(&rbfIndex, false); err != nil {
-		return fmt.Errorf("failed to register ringbuf empty: %w", err)
+	if err := t.initMissedMap(); err != nil {
+		return fmt.Errorf("failed to initialise error map: %w", err)
 	}
 
 	tp, err := link.AttachRawTracepoint(link.RawTracepointOptions{
@@ -114,9 +117,6 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	eventsChan := make(chan sysoScEvent, 512)
 	defer close(eventsChan)
 
-	rbFullChan := make(chan struct{})
-	defer close(rbFullChan)
-
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start executable: %w", err)
 	}
@@ -134,26 +134,20 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 
 	group.Go(
 		func() error {
-			t.startTime = time.Now().UnixNano()
 			return t.monitorScEvents(ctx, rd, eventsChan)
 		})
 
 	group.Go(
 		func() error {
-			return t.monitorScEventsFull(ctx, rbFullChan)
-		})
-
-	group.Go(
-		func() error {
-			return t.listen(ctx, eventsChan, rbFullChan)
+			return t.listen(ctx, eventsChan)
 		})
 
 	if err := group.Wait(); err != nil {
 		return err
 	}
 
-	if _, err := t.output.Seek(-1, io.SeekEnd); err != nil {
-		return fmt.Errorf("failed to seek back a byte: %w", err)
+	if err := t.writeMissedStats(); err != nil {
+		return fmt.Errorf("failed to write missed stats: %w", err)
 	}
 
 	if _, err := t.output.Write([]byte("]")); err != nil {
@@ -163,31 +157,13 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	return nil
 }
 
-func (t *Tracer) monitorScEventsFull(ctx context.Context, rbFullChan chan struct{}) error {
-	var ringbufFull bool
+func (t *Tracer) initFollowMap() error {
+	pid := os.Getpid()
 
-	prevFull := false
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		prevFull = ringbufFull
-
-		if err := t.objects.ScEventsFullMap.Lookup(&rbfIndex, &ringbufFull); err != nil {
-			return fmt.Errorf("failed to check if ringbuffer is full: %w", err)
-		}
-
-		if !ringbufFull || (ringbufFull && prevFull) {
-			continue
-		}
-
-		// only send when state changes from "not full" to "full" to avoid cluttering stats
-		rbFullChan <- struct{}{}
+	if err := t.objects.FollowPidMap.Put(int32(pid), true); err != nil {
+		return fmt.Errorf("failed to register pid into follow map: %w", err)
 	}
+	return nil
 }
 
 func (t *Tracer) monitorScEvents(ctx context.Context, rd *ringbuf.Reader, eventsChan chan sysoScEvent) error {
@@ -217,7 +193,7 @@ func (t *Tracer) monitorScEvents(ctx context.Context, rd *ringbuf.Reader, events
 	}
 }
 
-func (t *Tracer) listen(ctx context.Context, eventsChan chan sysoScEvent, rbFullChan chan struct{}) error {
+func (t *Tracer) listen(ctx context.Context, eventsChan chan sysoScEvent) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -228,19 +204,11 @@ func (t *Tracer) listen(ctx context.Context, eventsChan chan sysoScEvent, rbFull
 			if err := t.reportEvent(event); err != nil {
 				return fmt.Errorf("failed to report event: %w", err)
 			}
-		case <-rbFullChan:
-			if err := t.reportMissedStat(); err != nil {
-				return fmt.Errorf("failed to report missed stat: %w", err)
-			}
 		}
 	}
 }
 
 func (t *Tracer) reportEvent(event sysoScEvent) error {
-	if t.firstStat == 0 {
-		t.firstStat = event.Timestamp
-	}
-
 	sharedLib, err := t.maps.AssignPC(event.Pc, event.Pid, event.Dirty)
 	if err != nil {
 		t.logger.Errorw(
@@ -266,38 +234,74 @@ func (t *Tracer) reportEvent(event sysoScEvent) error {
 }
 
 func (t *Tracer) reportStat(stat Stat) error {
-	bts, err := json.Marshal(stat)
-	if err != nil {
-		return fmt.Errorf("failed to marshal stat to json: %w", err)
+	if commaNeeded {
+		if _, err := t.output.Write([]byte(",")); err != nil {
+			return fmt.Errorf("failed to write comma: %w", err)
+		}
+	} else {
+		commaNeeded = true
 	}
 
-	n, err := t.output.Write(bts)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrStatSaveFailed, err)
-	}
-
-	if n != len(bts) {
-		return fmt.Errorf("%w: bits written (%d) != bits to write (%d)", n, len(bts))
-	}
-
-	if _, err := t.output.Write([]byte(",")); err != nil {
-		return fmt.Errorf("failed to add comma: %w", err)
+	encoder := json.NewEncoder(t.output)
+	if err := encoder.Encode(stat); err != nil {
+		return fmt.Errorf("failed to encode stat as JSON: %w", err)
 	}
 
 	return nil
 }
 
-func (t *Tracer) reportMissedStat() error {
-	// may seem strange to get a timestamp in userspace: why cant this be done in the kernel?
-	//
-	// tracing programs don't support spinlocking yet, so can't safely update timestamps in a BPF_MAP_TYPE_HASH.
-	// since just an estimate is required, this is fine: if it becomes a problem, can change later.
-	//
-	// note: not a problem with ring buffers as ring buffers guarantee event ordering to be preserved.
-	now := time.Now().UnixNano()
+func (t *Tracer) initMissedMap() error {
+	zero := uint64(0)
 
-	// estimate ktime
-	missedStat.Timestamp = t.firstStat + uint64(now-t.startTime)
+	// this is okay in >=go1.22
+	// see https://go.dev/wiki/LoopvarExperiment#what-is-the-solution
+	for i := int32(0); i < nSysoFailureTypes; i++ {
+		if err := t.objects.ErrMap.Put(&i, &zero); err != nil {
+			return fmt.Errorf("failed to initialise errmap %d to zero: %w", i, err)
+		}
+	}
 
-	return t.reportStat(missedStat)
+	return nil
+}
+
+func (t *Tracer) readMissedMap() (*MissedStats, error) {
+	missed := MissedStats{}
+
+	// not allowed to take an address of a constant, hence the assignment
+	ringbufFull := sysoFailureTypeRINGBUF_FULL
+	if err := t.objects.ErrMap.Lookup(&ringbufFull, &missed.RingBufFull); err != nil {
+		return nil, fmt.Errorf("failed to read ringbuf full errors: %w", err)
+	}
+
+	parentFailed := sysoFailureTypeGET_PARENT_FAILED
+	if err := t.objects.ErrMap.Lookup(&parentFailed, &missed.RingBufFull); err != nil {
+		return nil, fmt.Errorf("failed to read ringbuf full errors: %w", err)
+	}
+
+	ptRegsFailed := sysoFailureTypeGET_PT_REGS_FAILED
+	if err := t.objects.ErrMap.Lookup(&ptRegsFailed, &missed.RingBufFull); err != nil {
+		return nil, fmt.Errorf("failed to read ringbuf full errors: %w", err)
+	}
+
+	return &missed, nil
+}
+
+func (t *Tracer) writeMissedStats() error {
+	if commaNeeded {
+		if _, err := t.output.Write([]byte(",")); err != nil {
+			return fmt.Errorf("failed to write comma: %w", err)
+		}
+	}
+
+	missed, err := t.readMissedMap()
+	if err != nil {
+		return fmt.Errorf("failed to read missed map: %w", err)
+	}
+
+	encoder := json.NewEncoder(t.output)
+	if err := encoder.Encode(missed); err != nil {
+		return fmt.Errorf("failed to encode missed stats: %w", err)
+	}
+
+	return nil
 }
