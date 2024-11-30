@@ -265,25 +265,40 @@ func (t *Tracer) initMissedMap() error {
 }
 
 func (t *Tracer) readMissedMap() (*MissedStats, error) {
-	missed := MissedStats{}
+	var (
+		rbFull       uint64
+		parentFailed uint64
+		ptRegsFailed uint64
+	)
 
 	// not allowed to take an address of a constant, hence the assignment
-	ringbufFull := sysoFailureTypeRINGBUF_FULL
-	if err := t.objects.ErrMap.Lookup(&ringbufFull, &missed.RingBufFull); err != nil {
+	i := sysoFailureTypeRINGBUF_FULL
+	if err := t.objects.ErrMap.Lookup(&i, &rbFull); err != nil {
 		return nil, fmt.Errorf("failed to read ringbuf full errors: %w", err)
 	}
 
-	parentFailed := sysoFailureTypeGET_PARENT_FAILED
-	if err := t.objects.ErrMap.Lookup(&parentFailed, &missed.RingBufFull); err != nil {
+	i = sysoFailureTypeGET_PARENT_FAILED
+	if err := t.objects.ErrMap.Lookup(&i, &parentFailed); err != nil {
 		return nil, fmt.Errorf("failed to read ringbuf full errors: %w", err)
 	}
 
-	ptRegsFailed := sysoFailureTypeGET_PT_REGS_FAILED
-	if err := t.objects.ErrMap.Lookup(&ptRegsFailed, &missed.RingBufFull); err != nil {
+	i = sysoFailureTypeGET_PT_REGS_FAILED
+	if err := t.objects.ErrMap.Lookup(&i, &ptRegsFailed); err != nil {
 		return nil, fmt.Errorf("failed to read ringbuf full errors: %w", err)
 	}
 
-	return &missed, nil
+	t.logger.Infow(
+		"missed syscalls",
+		"ringbuf-full", rbFull,
+		"get-parent-failed", parentFailed,
+		"get-pt-regs-failed", ptRegsFailed,
+	)
+
+	return &MissedStats{
+		RingBufFull:     rbFull,
+		GetParentFailed: parentFailed,
+		GetPTRegsFailed: ptRegsFailed,
+	}, nil
 }
 
 func (t *Tracer) writeMissedStats() error {
