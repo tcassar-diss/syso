@@ -18,6 +18,7 @@ const (
 	sysoFailureTypeRINGBUF_FULL       sysoFailureType = 0
 	sysoFailureTypeGET_PARENT_FAILED  sysoFailureType = 1
 	sysoFailureTypeGET_PT_REGS_FAILED sysoFailureType = 2
+	sysoFailureTypeALWAYS             sysoFailureType = 3
 )
 
 type sysoScEvent struct {

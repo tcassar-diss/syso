@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -41,18 +40,17 @@ func main() {
 	}
 	defer f.Close()
 
-	tracer, err := syso.NewTracer(logger, f, &maps)
+	reporter := syso.NewReporter(logger, f)
+
+	tracer, err := syso.NewTracer(logger, reporter)
 	if err != nil {
 		logger.Fatalw("failed to create tracer", "err", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	err = tracer.Trace(ctx, executable, args...)
-	if errors.Is(err, syso.ErrReadTimeout) {
-		logger.Infow("quit after timeout, all done!")
-	} else if err != nil {
+	if err != nil {
 		logger.Fatalw("failed to trace", "executable", executable, "err", err)
 	}
 }

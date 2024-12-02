@@ -1,3 +1,4 @@
+*.torefactor
 stats/
 log/
 *-stats.json
