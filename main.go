@@ -39,9 +39,9 @@ func main() {
 	}
 	defer f.Close()
 
-	reporter := syso.NewReporter(logger, f)
+	reporter := syso.NewUntimedReporter(logger, f)
 
-	tracer, err := syso.NewTracer(logger, reporter, &maps)
+	tracer, err := syso.NewTracer(logger, &maps, reporter)
 	if err != nil {
 		logger.Fatalw("failed to create tracer", "err", err)
 	}

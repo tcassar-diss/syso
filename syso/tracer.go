@@ -17,17 +17,17 @@ import (
 type Tracer struct {
 	logger    *zap.SugaredLogger
 	processor *Processor
-	reporter  *Reporter
+	reporter  Reporter
 	maps      *ProcMaps
 	objects   *sysoObjects
 }
 
-func NewTracer(logger *zap.SugaredLogger, reporter *Reporter, maps *ProcMaps) (*Tracer, error) {
+func NewTracer(logger *zap.SugaredLogger, maps *ProcMaps, reporter Reporter) (*Tracer, error) {
 	t := Tracer{
 		logger:   logger,
-		reporter: reporter,
 		maps:     maps,
 		objects:  &sysoObjects{},
+		reporter: reporter,
 	}
 
 	if err := loadSysoObjects(t.objects, nil); err != nil {
@@ -63,7 +63,7 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	}
 	defer rd.Close()
 
-	t.processor = NewProcessor(t.logger, rd, t.maps)
+	t.processor = NewProcessor(t.logger, rd, t.maps, t.reporter)
 
 	cmd := exec.Command(executable, args...)
 	cmd.Stdout = os.Stdout
@@ -102,8 +102,12 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 		return fmt.Errorf("failed to read missed stats map: %w", err)
 	}
 
-	if err := t.reporter.ReportMissed(missed); err != nil {
+	if err := t.reporter.WriteMissed("/app/stats/missed", missed); err != nil {
 		return fmt.Errorf("failed to report missed stats: %w", err)
+	}
+
+	if err := t.reporter.WriteFile("/app/stats/counts"); err != nil {
+		return fmt.Errorf("failed to report syscall counts: %w", err)
 	}
 
 	return nil

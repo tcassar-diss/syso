@@ -4,84 +4,27 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"sync"
 
 	"github.com/cilium/ebpf/ringbuf"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
-type Libs struct {
-	logger    *zap.SugaredLogger
-	libraries map[string]int
-	mu        sync.Mutex
-}
-
-func NewLibs(logger *zap.SugaredLogger) *Libs {
-	return &Libs{
-		logger:    logger,
-		libraries: make(map[string]int),
-	}
-}
-
-func (l *Libs) Add(lib string) {
-	l.mu.Lock()
-	_, ok := l.libraries[lib]
-	l.mu.Unlock()
-
-	if ok {
-		l.mu.Lock()
-		l.libraries[lib]++
-		l.mu.Unlock()
-		return
-	}
-
-	l.logger.Infow("new library found", "library", lib)
-
-	l.mu.Lock()
-	l.libraries[lib] = 1
-	l.mu.Unlock()
-}
-
-func (l *Libs) Dump() map[string]int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	return l.libraries
-}
-
-func (l *Libs) WriteFile(filepath string) error {
-	bts, err := json.Marshal(l.Dump())
-	if err != nil {
-		return fmt.Errorf("failed to marshall libraries: %w", err)
-	}
-
-	if err := os.WriteFile(filepath, bts, 0o777); err != nil {
-		l.logger.Errorw("library dump failed", "err", err)
-
-		return fmt.Errorf("failed to dump libaries to file: %w", err)
-	}
-
-	return nil
-}
-
 type Processor struct {
-	logger *zap.SugaredLogger
-	rb     *ringbuf.Reader
-	maps   *ProcMaps
-	libs   *Libs
+	logger   *zap.SugaredLogger
+	rb       *ringbuf.Reader
+	maps     *ProcMaps
+	reporter Reporter
 }
 
-func NewProcessor(logger *zap.SugaredLogger, rb *ringbuf.Reader, maps *ProcMaps) *Processor {
+func NewProcessor(logger *zap.SugaredLogger, rb *ringbuf.Reader, maps *ProcMaps, reporter Reporter) *Processor {
 	return &Processor{
-		logger: logger,
-		rb:     rb,
-		maps:   maps,
-		libs:   NewLibs(logger),
+		logger:   logger,
+		rb:       rb,
+		maps:     maps,
+		reporter: reporter,
 	}
 }
 
@@ -183,10 +126,9 @@ func (p *Processor) report(ctx context.Context, statsChan <-chan *Stat) error {
 	for {
 		select {
 		case <-ctx.Done():
-			p.logger.Infow("found libraries", "libs", p.libs.Dump())
-			return p.libs.WriteFile("/app/stats/libraries")
-		case s := <-statsChan:
-			p.libs.Add(s.Library)
+			return nil
+		case stat := <-statsChan:
+			p.reporter.Report(stat)
 		}
 	}
 }
