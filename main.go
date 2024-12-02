@@ -25,7 +25,6 @@ func main() {
 	}
 
 	maps := syso.NewProcMaps(logger)
-	defer maps.Close()
 
 	executable := os.Args[1]
 	args := os.Args[2:]
@@ -42,7 +41,7 @@ func main() {
 
 	reporter := syso.NewReporter(logger, f)
 
-	tracer, err := syso.NewTracer(logger, reporter)
+	tracer, err := syso.NewTracer(logger, reporter, &maps)
 	if err != nil {
 		logger.Fatalw("failed to create tracer", "err", err)
 	}

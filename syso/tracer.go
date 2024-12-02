@@ -18,13 +18,15 @@ type Tracer struct {
 	logger    *zap.SugaredLogger
 	processor *Processor
 	reporter  *Reporter
+	maps      *ProcMaps
 	objects   *sysoObjects
 }
 
-func NewTracer(logger *zap.SugaredLogger, reporter *Reporter) (*Tracer, error) {
+func NewTracer(logger *zap.SugaredLogger, reporter *Reporter, maps *ProcMaps) (*Tracer, error) {
 	t := Tracer{
 		logger:   logger,
 		reporter: reporter,
+		maps:     maps,
 		objects:  &sysoObjects{},
 	}
 
@@ -61,7 +63,7 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	}
 	defer rd.Close()
 
-	t.processor = NewProcessor(t.logger, rd)
+	t.processor = NewProcessor(t.logger, rd, t.maps)
 
 	cmd := exec.Command(executable, args...)
 	cmd.Stdout = os.Stdout

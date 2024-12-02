@@ -3,15 +3,13 @@ package syso
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"go.uber.org/zap"
 )
-
-const debug = false
 
 type MemMap struct {
 	AddrStart uint64
@@ -24,62 +22,58 @@ func (m *MemMap) contains(addr uint64) bool {
 	return addr >= m.AddrStart && addr < m.AddrEnd
 }
 
+// ProcMaps provides a thread safe way to read the virtual address space of a process.
 type ProcMaps struct {
 	logger *zap.SugaredLogger
-	files  map[int32]*os.File
 	maps   map[int32][]*MemMap
+	mu     sync.Mutex
 }
 
 func NewProcMaps(logger *zap.SugaredLogger) ProcMaps {
 	return ProcMaps{
 		logger: logger,
-		files:  make(map[int32]*os.File),
 		maps:   make(map[int32][]*MemMap),
 	}
 }
 
-func (p ProcMaps) Close() error {
-	for pid, f := range p.files {
-		if err := f.Close(); err != nil {
-			p.logger.Errorw("failed to close proc map file", "pid", pid, "err", err)
-		}
-	}
-
-	return nil
-}
-
-// ByPID will return memory mappings for a given PID.
+// ReadAddrSpace will return memory mappings for a given PID.
 //
-// ByPID will cache: to force a new lookup, use dirty=true.
-func (p ProcMaps) ByPID(pid int32, dirty bool) ([]*MemMap, error) {
+// ReadAddrSpace will cache: to force a new lookup, use dirty=true.
+func (p *ProcMaps) ReadAddrSpace(pid int32, dirty bool) ([]*MemMap, error) {
 	var (
-		f   *os.File
-		ok  bool
-		err error
+		maps []*MemMap
+		err  error
 	)
 
-	f, ok = p.files[pid]
-	if !ok || dirty {
-		fp := fmt.Sprintf("/proc/%d/maps", pid)
-		f, err = os.Open(fp)
+	p.mu.Lock()
+	maps, ok := p.maps[pid]
+	p.mu.Unlock()
+
+	if dirty || !ok {
+		maps, err = p.readAddrSpace(pid)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load %s: %w", fp, err)
+			return nil, fmt.Errorf("failed to read process %d's address space: %w", pid, err)
 		}
 
-		p.files[pid] = f
-
-		if debug {
-			p.logger.Infow("loading proc maps from filesystem", "pid", pid)
-		}
+		p.mu.Lock()
+		p.maps[pid] = maps
+		p.mu.Unlock()
 	}
 
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("failed to seek to start of file")
+	return maps, nil
+}
+
+func (p *ProcMaps) readAddrSpace(pid int32) ([]*MemMap, error) {
+	fp := fmt.Sprintf("/proc/%d/maps", pid)
+
+	f, err := os.Open(fp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open %s: %w", fp, err)
 	}
+	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-
-	c := 0
+	var maps []*MemMap
 
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
@@ -87,8 +81,6 @@ func (p ProcMaps) ByPID(pid int32, dirty bool) ([]*MemMap, error) {
 		if len(fields) < 6 {
 			continue
 		}
-
-		c++
 
 		addrParts := strings.SplitN(fields[0], "-", 2)
 
@@ -107,7 +99,7 @@ func (p ProcMaps) ByPID(pid int32, dirty bool) ([]*MemMap, error) {
 			return nil, fmt.Errorf("failed to parse offset: %w", err)
 		}
 
-		p.maps[pid] = append(p.maps[pid], &MemMap{
+		maps = append(maps, &MemMap{
 			AddrStart: addrStart,
 			AddrEnd:   addrEnd,
 			Offset:    offset,
@@ -115,22 +107,14 @@ func (p ProcMaps) ByPID(pid int32, dirty bool) ([]*MemMap, error) {
 		})
 	}
 
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("failed to seek to start of file")
-	}
-
-	if debug {
-		p.logger.Infow("Loaded proc/[PID]/maps", "c", c)
-	}
-
-	return p.maps[pid], nil
+	return maps, nil
 }
 
 // AssignPC will assign a PC value to a shared object file.
 //
-// AssignPC relies on ByPID: pass dirty=true to force a new proc maps lookup.
-func (p ProcMaps) AssignPC(pc uint64, pid int32, dirty bool) (string, error) {
-	mmap, err := p.ByPID(pid, dirty)
+// AssignPC relies on ReadAddrSpace: pass dirty=true to force a new proc maps lookup.
+func (p *ProcMaps) AssignPC(pc uint64, pid int32, dirty bool) (string, error) {
+	mmap, err := p.ReadAddrSpace(pid, dirty)
 	if err != nil {
 		return "", fmt.Errorf("failed to load memory map: %w", err)
 	}
