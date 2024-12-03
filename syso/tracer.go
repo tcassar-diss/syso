@@ -63,7 +63,7 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	}
 	defer rd.Close()
 
-	t.processor = NewProcessor(t.logger, rd, t.maps, t.reporter)
+	t.processor = NewProcessor(t.logger, rd, t.maps, t.reporter, nil)
 
 	cmd := exec.Command(executable, args...)
 	cmd.Stdout = os.Stdout
@@ -74,7 +74,8 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	}
 	defer cmd.Wait()
 
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	// todo: refactor into part of struct cfg
+	ctx, cancel := context.WithTimeout(ctx, 35*time.Second)
 
 	stopper := make(chan os.Signal)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
@@ -102,11 +103,11 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 		return fmt.Errorf("failed to read missed stats map: %w", err)
 	}
 
-	if err := t.reporter.WriteMissed("/app/stats/missed", missed); err != nil {
+	if err := t.reporter.WriteMissed("/app/stats/missed.json", missed); err != nil {
 		return fmt.Errorf("failed to report missed stats: %w", err)
 	}
 
-	if err := t.reporter.WriteFile("/app/stats/counts"); err != nil {
+	if err := t.reporter.WriteFile("/app/stats/counts.json"); err != nil {
 		return fmt.Errorf("failed to report syscall counts: %w", err)
 	}
 

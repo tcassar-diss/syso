@@ -50,6 +50,8 @@ func (p *ProcMaps) ReadAddrSpace(pid int32, dirty bool) ([]*MemMap, error) {
 	p.mu.Unlock()
 
 	if dirty || !ok {
+		p.logger.Infow("reading address space", "pid", pid)
+
 		maps, err = p.readAddrSpace(pid)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read process %d's address space: %w", pid, err)
@@ -107,6 +109,10 @@ func (p *ProcMaps) readAddrSpace(pid int32) ([]*MemMap, error) {
 		})
 	}
 
+	if maps == nil {
+		p.logger.Warnw("nothing in /proc/pid/maps", "pid", pid)
+	}
+
 	return maps, nil
 }
 
@@ -117,6 +123,10 @@ func (p *ProcMaps) AssignPC(pc uint64, pid int32, dirty bool) (string, error) {
 	mmap, err := p.ReadAddrSpace(pid, dirty)
 	if err != nil {
 		return "", fmt.Errorf("failed to load memory map: %w", err)
+	}
+
+	if len(mmap) == 0 {
+		p.logger.Warnw("empty memory map", "pid", pid, "pc", pc, "dirty", dirty)
 	}
 
 	for _, m := range mmap {
