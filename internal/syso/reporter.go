@@ -15,24 +15,24 @@ type Reporter interface {
 	WriteFile(filepath string) error
 }
 
-type untimedReporter struct {
+type mtReporter struct {
 	logger *zap.SugaredLogger
 	// stats is a map from library -> syscall_nr -> count
 	stats map[string]map[uint64]int
 	mu    sync.Mutex
 }
 
-// NewUntimedReporter is a thread safe reporter that ignores timestamps.
+// NewMTReporter is a thread safe reporter that ignores timestamps.
 //
 // The reporter associates a library with a syscall number and a count.
-func NewUntimedReporter(logger *zap.SugaredLogger) Reporter {
-	return &untimedReporter{
+func NewMTReporter(logger *zap.SugaredLogger) Reporter {
+	return &mtReporter{
 		logger: logger,
 		stats:  make(map[string]map[uint64]int),
 	}
 }
 
-func (u *untimedReporter) Report(stat *Stat) {
+func (u *mtReporter) Report(stat *Stat) {
 	u.mu.Lock()
 	_, ok := u.stats[stat.Library]
 
@@ -50,7 +50,7 @@ func (u *untimedReporter) Report(stat *Stat) {
 	u.logger.Infow("syscall from a new library", "library", stat.Library)
 }
 
-func (u *untimedReporter) WriteMissed(filepath string, missed *MissedStats) error {
+func (u *mtReporter) WriteMissed(filepath string, missed *MissedStats) error {
 	bts, err := json.Marshal(missed)
 	if err != nil {
 		return fmt.Errorf("failed to marshall stats: %w", err)
@@ -63,7 +63,7 @@ func (u *untimedReporter) WriteMissed(filepath string, missed *MissedStats) erro
 	return nil
 }
 
-func (u *untimedReporter) WriteFile(filepath string) error {
+func (u *mtReporter) WriteFile(filepath string) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 

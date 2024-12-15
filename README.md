@@ -13,6 +13,10 @@
 
 ## Running Syso
 
+### `./run.sh`
+
+`./run.sh` will take care of all build steps. Just supply the executable to trace and any arguments that it needs.
+
 ### Docker
 
 ```shell

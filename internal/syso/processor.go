@@ -26,7 +26,13 @@ type Processor struct {
 	cfg      *ProcessorCgf
 }
 
-func NewProcessor(logger *zap.SugaredLogger, rb *ringbuf.Reader, maps *ProcMaps, reporter Reporter, cfg *ProcessorCgf) *Processor {
+func NewProcessor(
+	logger *zap.SugaredLogger,
+	rb *ringbuf.Reader,
+	maps *ProcMaps,
+	reporter Reporter,
+	cfg *ProcessorCgf,
+) *Processor {
 	if cfg == nil {
 		cfg = &ProcessorCgf{
 			workers:         16,

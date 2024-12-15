@@ -28,7 +28,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY ./bpf ./bpf
-COPY ./syso ./syso
+COPY ./internal/ ./internal/
 COPY main.go main.c Makefile ./
 
 RUN make && sysctl kernel.randomize_va_space=0

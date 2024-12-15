@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/tcassar-diss/syso/syso"
+	"github.com/tcassar-diss/syso/internal/syso"
 	"go.uber.org/zap"
 )
 
@@ -22,7 +22,7 @@ func main() {
 	executable := os.Args[1]
 	args := os.Args[2:]
 
-	reporter := syso.NewUntimedReporter(logger)
+	reporter := syso.NewMTReporter(logger)
 
 	tracer, err := syso.NewTracer(logger, &maps, reporter)
 	if err != nil {
