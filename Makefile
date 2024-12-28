@@ -1,4 +1,4 @@
-syso: ./bpf/syso.ebpf.c sample trace
+all-naive: ./bpf/syso.ebpf.c sample naive
 
 clean:
 	rm bin/* main
@@ -6,9 +6,9 @@ clean:
 sample: ./main.c
 	gcc -o main ./main.c
 
-trace: ./main.go
-	go generate ./...
-	go build -o bin/syso .
+naive: ./cmd/naive/main.go
+	go generate ./internal/naive/gen.go
+	go build -o bin/syso ./cmd/naive
 
 vmlinux.h: /usr/include/x86_64-linux-gnu/asm $(which bpftool)
 	ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm && \

@@ -1,6 +1,7 @@
 FROM ubuntu:22.04
 
 ARG KERNEL_VERSION=6.8.0-45-generic 
+ARG MAKE_TARGET="all-naive"
 
 RUN apt update -y && apt upgrade -y && \
     apt install -y \
@@ -27,10 +28,11 @@ COPY go.mod go.sum ./
 
 RUN go mod download
 
+COPY ./cmd ./cmd
 COPY ./bpf ./bpf
 COPY ./internal/ ./internal/
-COPY main.go main.c Makefile ./
+COPY main.c Makefile ./
 
-RUN make && sysctl kernel.randomize_va_space=0
+RUN make ${MAKE_TARGET} && sysctl kernel.randomize_va_space=0
 
 ENTRYPOINT ["./bin/syso"]

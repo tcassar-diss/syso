@@ -9,4 +9,4 @@ main
 analyses/venv
 **/.ipynb_checkpoints
 analyses/syscalls.csv
-cmd
+cmd/maps
