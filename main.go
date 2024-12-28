@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
+	"github.com/tcassar-diss/syso/internal/procmaps"
 	"log"
 	"os"
 
-	"github.com/tcassar-diss/syso/internal/syso"
+	"github.com/tcassar-diss/syso/internal/naive"
 	"go.uber.org/zap"
 )
 
@@ -17,14 +18,14 @@ func main() {
 
 	logger := prodLogger.Sugar()
 
-	maps := syso.NewProcMaps(logger)
+	maps := procmaps.NewProcMaps(logger)
 
 	executable := os.Args[1]
 	args := os.Args[2:]
 
-	reporter := syso.NewMTReporter(logger)
+	reporter := naive.NewMTReporter(logger)
 
-	tracer, err := syso.NewTracer(logger, &maps, reporter)
+	tracer, err := naive.NewTracer(logger, &maps, reporter)
 	if err != nil {
 		logger.Fatalw("failed to create tracer", "err", err)
 	}

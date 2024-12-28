@@ -9,7 +9,7 @@ fi
 
 echo "[INFO] Building image..."
 
-docker build . -t syso
+docker build . -t naive
 build_res=$?
 
 if [[ build_res -ne 0 ]]; then
@@ -21,7 +21,7 @@ echo "[INFO] Build successful"
 
 echo "[INFO] Running image"
 
-docker run --pid=host --privileged -v ./stats:/app/stats syso "$@"
+docker run --pid=host --privileged -v ./stats:/app/stats naive "$@"
 run_res=$?
 
 if [[ run_res -ne 0 ]]; then

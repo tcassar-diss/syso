@@ -1,4 +1,4 @@
-package syso
+package naive
 
 import (
 	"encoding/json"
