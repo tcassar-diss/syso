@@ -1,5 +1,7 @@
 #! /usr/bin/env bash
 
+MAKE_TARGET="all-stackparse"
+
 echo "[INFO] Running \`syso\`"
 
 if [[ ! -f Dockerfile ]]; then
@@ -9,7 +11,7 @@ fi
 
 echo "[INFO] Building image..."
 
-docker build . -t naive
+docker build --build-arg MAKE_TARGET=$MAKE_TARGET . -t naive
 build_res=$?
 
 if [[ build_res -ne 0 ]]; then
@@ -30,4 +32,3 @@ if [[ run_res -ne 0 ]]; then
 fi;
 
 echo "[INFO] Wrote output to ./stats"
-

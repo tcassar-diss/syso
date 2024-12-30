@@ -1,6 +1,6 @@
 FROM ubuntu:22.04
 
-ARG KERNEL_VERSION=6.8.0-45-generic 
+ARG KERNEL_VERSION=6.8.0-45-generic
 ARG MAKE_TARGET="all-naive"
 
 RUN apt update -y && apt upgrade -y && \
