@@ -1,4 +1,4 @@
-syso: ./bpf/syso.ebpf.c sample trace
+syso: ./bpf/syso.bpf.c sample trace
 
 clean:
 	rm bin/* main

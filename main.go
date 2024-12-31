@@ -5,14 +5,14 @@ import (
 	"log"
 	"os"
 
-	"github.com/tcassar-diss/syso/internal/syso"
+	"github.com/tcassar-diss/syso/syso"
 	"go.uber.org/zap"
 )
 
 func main() {
 	prodLogger, err := zap.NewProduction()
 	if err != nil {
-		log.Fatalf("failed to get logger: %w", err)
+		log.Fatalf("failed to get logger: %v", err)
 	}
 
 	logger := prodLogger.Sugar()
