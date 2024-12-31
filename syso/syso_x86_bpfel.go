@@ -31,6 +31,17 @@ type sysoScEvent struct {
 	_         [7]byte
 }
 
+type sysoStackTraceT struct {
+	UserStackSize        int32
+	UserStackBuildidSize int32
+	UserStack            [100]uint64
+	UserStackBuildid     [100]struct {
+		Status  int32
+		BuildId [20]uint8
+		Offset  uint64
+	}
+}
+
 // loadSyso returns the embedded CollectionSpec for syso.
 func loadSyso() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_SysoBytes)

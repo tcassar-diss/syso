@@ -11,6 +11,7 @@ import (
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/tcassar-diss/syso/addrspace"
 	"go.uber.org/zap"
 )
 
@@ -18,11 +19,11 @@ type Tracer struct {
 	logger    *zap.SugaredLogger
 	processor *Processor
 	reporter  Reporter
-	maps      *ProcMaps
+	maps      *addrspace.ProcMaps
 	objects   *sysoObjects
 }
 
-func NewTracer(logger *zap.SugaredLogger, maps *ProcMaps, reporter Reporter) (*Tracer, error) {
+func NewTracer(logger *zap.SugaredLogger, maps *addrspace.ProcMaps, reporter Reporter) (*Tracer, error) {
 	t := Tracer{
 		logger:   logger,
 		maps:     maps,

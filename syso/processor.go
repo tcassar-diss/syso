@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/tcassar-diss/syso/addrspace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -21,7 +22,7 @@ type ProcessorCgf struct {
 type Processor struct {
 	logger   *zap.SugaredLogger
 	rb       *ringbuf.Reader
-	maps     *ProcMaps
+	maps     *addrspace.ProcMaps
 	reporter Reporter
 	cfg      *ProcessorCgf
 }
@@ -29,7 +30,7 @@ type Processor struct {
 func NewProcessor(
 	logger *zap.SugaredLogger,
 	rb *ringbuf.Reader,
-	maps *ProcMaps,
+	maps *addrspace.ProcMaps,
 	reporter Reporter,
 	cfg *ProcessorCgf,
 ) *Processor {

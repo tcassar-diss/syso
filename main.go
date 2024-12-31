@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/tcassar-diss/syso/addrspace"
 	"github.com/tcassar-diss/syso/syso"
 	"go.uber.org/zap"
 )
@@ -17,7 +18,7 @@ func main() {
 
 	logger := prodLogger.Sugar()
 
-	maps := syso.NewProcMaps(logger)
+	maps := addrspace.NewProcMaps(logger)
 
 	executable := os.Args[1]
 	args := os.Args[2:]

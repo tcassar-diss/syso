@@ -1,4 +1,4 @@
-package syso
+package addrspace
 
 import (
 	"bufio"
