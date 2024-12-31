@@ -20,8 +20,8 @@
 ### Docker
 
 ```shell
-docker build . -t naive 
-docker run -it --privileged --pid=host -v ./stats:/app/stats naive ./main hello world
+docker build . -t syso 
+docker run -it --privileged --pid=host -v ./stats:/app/stats syso ./main hello world
 ```
 
 - Command breakdown
@@ -36,7 +36,7 @@ docker run -it --privileged --pid=host -v ./stats:/app/stats naive ./main hello 
 ```shell
 sysctl kernel.randomize_va_space=0  # turn off ASLR
 make
-./bin/naive /path/to/exec args...
+./bin/syso /path/to/exec args...
 ```
 
 ## Limitations

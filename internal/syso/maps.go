@@ -1,4 +1,4 @@
-package procmaps
+package syso
 
 import (
 	"bufio"

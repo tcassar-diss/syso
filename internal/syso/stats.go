@@ -1,4 +1,4 @@
-package naive
+package syso
 
 // Stat represents a single complete statistic about a system call
 type Stat struct {

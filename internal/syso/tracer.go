@@ -1,9 +1,8 @@
-package naive
+package syso
 
 import (
 	"context"
 	"fmt"
-	"github.com/tcassar-diss/syso/internal/procmaps"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,11 +18,11 @@ type Tracer struct {
 	logger    *zap.SugaredLogger
 	processor *Processor
 	reporter  Reporter
-	maps      *procmaps.ProcMaps
+	maps      *ProcMaps
 	objects   *sysoObjects
 }
 
-func NewTracer(logger *zap.SugaredLogger, maps *procmaps.ProcMaps, reporter Reporter) (*Tracer, error) {
+func NewTracer(logger *zap.SugaredLogger, maps *ProcMaps, reporter Reporter) (*Tracer, error) {
 	t := Tracer{
 		logger:   logger,
 		maps:     maps,
