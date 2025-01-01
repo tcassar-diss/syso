@@ -1,4 +1,5 @@
 *.torefactor
+naive-stats
 stats/
 log/
 *-stats.json
