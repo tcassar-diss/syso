@@ -3,7 +3,9 @@ package addrspace
 import (
 	"bufio"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,7 +16,6 @@ import (
 type MemMap struct {
 	AddrStart uint64
 	AddrEnd   uint64
-	Offset    uint64
 	PathName  string
 }
 
@@ -75,7 +76,8 @@ func (p *ProcMaps) readAddrSpace(pid int32) ([]*MemMap, error) {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	var maps []*MemMap
+
+	mmaps := make(map[string]*MemMap)
 
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
@@ -96,24 +98,28 @@ func (p *ProcMaps) readAddrSpace(pid int32) ([]*MemMap, error) {
 			return nil, fmt.Errorf("failed to parse end of address range: %w", err)
 		}
 
-		offset, err := strconv.ParseUint(fields[2], 16, 64)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse offset: %w", err)
+		pathname := fields[len(fields)-1]
+
+		existing, ok := mmaps[pathname]
+		if !ok {
+			mmaps[pathname] = &MemMap{
+				AddrStart: addrStart,
+				AddrEnd:   addrEnd,
+				PathName:  pathname,
+			}
+
+			continue
 		}
 
-		maps = append(maps, &MemMap{
-			AddrStart: addrStart,
-			AddrEnd:   addrEnd,
-			Offset:    offset,
-			PathName:  fields[len(fields)-1],
-		})
+		existing.AddrStart = min(existing.AddrStart, addrStart)
+		existing.AddrEnd = max(existing.AddrEnd, addrEnd)
 	}
 
-	if maps == nil {
+	if len(mmaps) == 0 {
 		p.logger.Warnw("nothing in /proc/pid/maps", "pid", pid)
 	}
 
-	return maps, nil
+	return slices.Collect(maps.Values(mmaps)), nil
 }
 
 // AssignPC will assign a PC value to a shared object file.
