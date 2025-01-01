@@ -22,20 +22,21 @@ const (
 )
 
 type sysoScEvent struct {
-	Pid       int32
-	Ppid      int32
-	Timestamp uint64
-	SyscallNr uint64
-	Pc        uint64
-	Dirty     bool
-	_         [7]byte
+	Pid        int32
+	Ppid       int32
+	Timestamp  uint64
+	SyscallNr  uint64
+	Pc         uint64
+	Stacktrace sysoStackTraceT
+	Dirty      bool
+	_          [7]byte
 }
 
 type sysoStackTraceT struct {
 	UserStackSize        int32
 	UserStackBuildidSize int32
-	UserStack            [100]uint64
-	UserStackBuildid     [100]struct {
+	UserStack            [256]uint64
+	UserStackBuildid     [256]struct {
 		Status  int32
 		BuildId [20]uint8
 		Offset  uint64
