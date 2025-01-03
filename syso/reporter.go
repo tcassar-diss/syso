@@ -47,7 +47,7 @@ func (u *mtReporter) Report(stat *Stat) {
 
 	u.mu.Unlock()
 
-	u.logger.Infow("syscall from a new library", "library", stat.Library)
+	u.logger.Debugw("syscall from a new library", "library", stat.Library)
 }
 
 func (u *mtReporter) WriteMissed(filepath string, missed *MissedStats) error {
@@ -70,54 +70,6 @@ func (u *mtReporter) WriteFile(filepath string) error {
 	u.logger.Infow("saving count stats")
 
 	bts, err := json.Marshal(u.stats)
-	if err != nil {
-		return fmt.Errorf("failed to marshall stats: %w", err)
-	}
-
-	if err := os.WriteFile(filepath, bts, 0o777); err != nil {
-		return fmt.Errorf("failed to save syscall stats: %w", err)
-	}
-
-	return nil
-}
-
-type completeReporter struct {
-	logger *zap.SugaredLogger
-	stats  []*Stat
-	mu     sync.Mutex
-}
-
-// NewCompleteReporter returns a reporter which writes all stats
-func NewCompleteReporter(logger *zap.SugaredLogger) Reporter {
-	return &completeReporter{logger: logger}
-}
-
-func (c *completeReporter) Report(stat *Stat) {
-	c.mu.Lock()
-	c.stats = append(c.stats, stat)
-	c.mu.Unlock()
-}
-
-func (c *completeReporter) WriteMissed(filepath string, missed *MissedStats) error {
-	bts, err := json.Marshal(missed)
-	if err != nil {
-		return fmt.Errorf("failed to marshall stats: %w", err)
-	}
-
-	if err := os.WriteFile(filepath, bts, 0o777); err != nil {
-		return fmt.Errorf("failed to save syscall stats: %w", err)
-	}
-
-	return nil
-}
-
-func (c *completeReporter) WriteFile(filepath string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.logger.Infow("saving count stats")
-
-	bts, err := json.Marshal(c.stats)
 	if err != nil {
 		return fmt.Errorf("failed to marshall stats: %w", err)
 	}
