@@ -11,3 +11,5 @@ analyses/venv
 **/.ipynb_checkpoints
 analyses/syscalls.csv
 cmd
+
+install

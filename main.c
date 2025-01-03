@@ -1,17 +1,33 @@
 //go:build exclude
 
-#include <stdio.h>
 #include <unistd.h>
-#include <sys/types.h>
+#include <stdio.h>
 
-int main(int argc, char** argv) {
+void __attribute__ ((noinline)) r(int i) {
+    // if (i > 10) {
+        printf("hello");
+        fflush(stdout);
+        return;
+}
 
-   fork();
+void  __attribute__ ((noinline)) b(int i) {
+    r(++i);
+}
+void  __attribute__ ((noinline)) c(int i) {
+    b(++i);
+}
+void __attribute__ ((noinline)) d(int i) {
+   c(++i);
+}
+int main() {
+    for (int i = 0; i < 10000; i++) {
+        //printf("%d\n", i);
+        d(0);
+    }
+    
+    int pid = getpid();
+    printf("\n\n\n\n\n\n\n\n\n%d\n\n\n\n\n\n\n\n\n", pid);
+   
 
-   sleep(1);
-
-   printf("%s %s\n", argv[1], argv[2]);
-
-
-   return 0;
+    return 0;
 }

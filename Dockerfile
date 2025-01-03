@@ -27,11 +27,15 @@ COPY go.mod go.sum ./
 
 RUN go mod download
 
-COPY ./addrspace ./addrspace/
-COPY ./bpf ./bpf
-COPY ./syso ./syso
-COPY main.go main.c Makefile ./
+# COPY ./addrspace ./addrspace/
+# COPY ./bpf ./bpf
+# COPY ./syso ./syso
+# COPY main.go main.c Makefile ./
 
-RUN make && sysctl kernel.randomize_va_space=0
+COPY . .
+
+# RUN make && sysctl kernel.randomize_va_space=0
+
+RUN sysctl kernel.randomize_va_space=0 &&  sysctl kernel.perf_event_max_stack=256
 
 ENTRYPOINT ["./bin/syso"]
