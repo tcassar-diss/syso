@@ -9,6 +9,15 @@ fi
 
 echo "[INFO] Building image..."
 
+make
+
+if [[ $? -ne 0 ]]; then
+    echo "[error] make was unsuccessful (returned code $build_res)"
+    exit 1
+fi;
+
+
+
 docker build . -t syso
 build_res=$?
 
@@ -21,7 +30,7 @@ echo "[INFO] Build successful"
 
 echo "[INFO] Running image"
 
-docker run --pid=host --privileged -v ./stats:/app/stats syso "$@"
+docker run --security-opt=seccomp:unconfined --pid=host --privileged -v ./stats:/app/stats syso ./main
 run_res=$?
 
 if [[ run_res -ne 0 ]]; then
