@@ -33,6 +33,13 @@ func TestReadAddrSpace(t *testing.T) {
 		{AddrStart: 0x7ffff7fc3000, AddrEnd: 0x7ffff7fc5000, PathName: "[vdso]"},
 		{AddrStart: 0x7ffffffde000, AddrEnd: 0x7ffffffff000, PathName: "[stack]"},
 		{AddrStart: 0xffffffffff600000, AddrEnd: 0xffffffffff601000, PathName: "[vsyscall]"},
+		{AddrStart: 0x555555696000, AddrEnd: 0x5555556b5000, PathName: "anonymous"},
+		{AddrStart: 0x7ffff7605000, AddrEnd: 0x7ffff7612000, PathName: "anonymous"},
+		{AddrStart: 0x7ffff7d10000, AddrEnd: 0x7ffff7d13000, PathName: "anonymous"},
+		{AddrStart: 0x7ffff7d6f000, AddrEnd: 0x7ffff7d9d000, PathName: "anonymous"},
+		{AddrStart: 0x7ffff7e12000, AddrEnd: 0x7ffff7e17000, PathName: "anonymous"},
+		{AddrStart: 0x7ffff7fa9000, AddrEnd: 0x7ffff7fb1000, PathName: "anonymous"},
+		{AddrStart: 0x7ffff7fbd000, AddrEnd: 0x7ffff7fbf000, PathName: "anonymous"},
 	}
 
 	procmaps := addrspace.NewTestProcMaps(

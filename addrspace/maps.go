@@ -14,14 +14,17 @@ import (
 	"go.uber.org/zap"
 )
 
-var ErrPMEntryInvalid = errors.New("procmaps line invalid")
+var (
+	ErrPMEntryInvalid  = errors.New("procmaps line invalid")
+	ErrNoMappingExists = errors.New("no mapping for given pc in process's address space")
+)
 
-var PMRegex = regexp.MustCompile(`^([a-z0-9]+)-([a-z0-9]+)\s[rwxsp-]{4}\s([0-9a-f]{8})\s\d{2}:\d{2}\s\d+\s+(.*)$`)
+var PMRegex = regexp.MustCompile(`^([a-z0-9]+)-([a-z0-9]+)\s[rwxsp-]{4}\s([0-9a-f]{8})\s\d{2}:\d{2}\s\d+\s*(.*)$`)
 
 type MemMap struct {
-	AddrStart uint64
-	AddrEnd   uint64
-	PathName  string
+	AddrStart uint64 `json:"addr_start"`
+	AddrEnd   uint64 `json:"addr_end"`
+	PathName  string `json:"path_name"`
 }
 
 func (m *MemMap) contains(addr uint64) bool {
@@ -69,9 +72,8 @@ func (p *ProcMaps) ReadAddrSpace(pid int32, dirty bool) ([]*MemMap, error) {
 	p.mu.Unlock()
 
 	if dirty || !ok {
-		p.logger.Infow("reading address space", "pid", pid)
-
 		maps, err = p.readAddrSpace(pid)
+		p.logger.Debugw("refreshed maps", "pid", pid, "maps", maps)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read process %d's address space: %w", pid, err)
 		}
@@ -93,15 +95,19 @@ func (p *ProcMaps) parseLine(l string) (*MemMap, error) {
 
 	start, err := strconv.ParseUint(res[0][1], 16, 64)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse address start %s: %w", res[0], err)
+		return nil, fmt.Errorf("failed to parse address start %s: %w", res[0][1], err)
 	}
 
 	end, err := strconv.ParseUint(res[0][2], 16, 64)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse address end %s: %w", res[0], err)
+		return nil, fmt.Errorf("failed to parse address end %s: %w", res[0][2], err)
 	}
 
-	path := string(res[0][4])
+	path := res[0][4]
+
+	if path == "" {
+		path = "anonymous"
+	}
 
 	return &MemMap{
 		AddrStart: start,
@@ -123,6 +129,9 @@ func (p *ProcMaps) readAddrSpace(pid int32) ([]*MemMap, error) {
 
 	mmaps := make(map[string]*MemMap)
 
+	// handle anonymous mapping seperately as their address space is not contiguous
+	anonmymous := make([]*MemMap, 0)
+
 	for scanner.Scan() {
 		l := scanner.Text()
 
@@ -135,6 +144,12 @@ func (p *ProcMaps) readAddrSpace(pid int32) ([]*MemMap, error) {
 			continue
 		} else if err != nil {
 			return nil, fmt.Errorf("failed to parse procmaps line: %w", err)
+		}
+
+		if addrs.PathName == "anonymous" {
+			anonmymous = append(anonmymous, addrs)
+
+			continue
 		}
 
 		existing, ok := mmaps[addrs.PathName]
@@ -151,7 +166,7 @@ func (p *ProcMaps) readAddrSpace(pid int32) ([]*MemMap, error) {
 		p.logger.Warnw("nothing in /proc/pid/maps", "pid", pid)
 	}
 
-	return slices.Collect(maps.Values(mmaps)), nil
+	return append(slices.Collect(maps.Values(mmaps)), anonmymous...), nil
 }
 
 // AssignPC will assign a PC value to a shared object file.
@@ -164,7 +179,7 @@ func (p *ProcMaps) AssignPC(pc uint64, pid int32, dirty bool) (string, error) {
 	}
 
 	if len(mmap) == 0 {
-		p.logger.Warnw("empty memory map", "pid", pid, "pc", pc, "dirty", dirty)
+		p.logger.Debugw("empty memory map", "pid", pid, "pc", pc, "dirty", dirty)
 	}
 
 	for _, m := range mmap {
@@ -175,7 +190,5 @@ func (p *ProcMaps) AssignPC(pc uint64, pid int32, dirty bool) (string, error) {
 		return m.PathName, nil
 	}
 
-	// if there was no mapping associated with [stack], [heap], or a shared library,
-	// the call must have come from an anonymously mapped space
-	return "anonymous", nil
+	return "", fmt.Errorf("no mapping for pc found: %w", ErrNoMappingExists)
 }
