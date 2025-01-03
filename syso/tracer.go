@@ -16,19 +16,29 @@ import (
 )
 
 type Tracer struct {
-	logger    *zap.SugaredLogger
-	processor *Processor
-	reporter  Reporter
-	maps      *addrspace.ProcMaps
-	objects   *sysoObjects
+	logger      *zap.SugaredLogger
+	processor   *Processor
+	reporter    Reporter
+	stackparser *addrspace.StackParser
+	objects     *sysoObjects
+	timeout     time.Duration
+	jobs        int
 }
 
-func NewTracer(logger *zap.SugaredLogger, maps *addrspace.ProcMaps, reporter Reporter) (*Tracer, error) {
+func NewTracer(
+	logger *zap.SugaredLogger,
+	stackparser *addrspace.StackParser,
+	reporter Reporter,
+	timeout time.Duration,
+	jobs int,
+) (*Tracer, error) {
 	t := Tracer{
-		logger:   logger,
-		maps:     maps,
-		objects:  &sysoObjects{},
-		reporter: reporter,
+		logger:      logger,
+		stackparser: stackparser,
+		objects:     &sysoObjects{},
+		reporter:    reporter,
+		timeout:     timeout,
+		jobs:        jobs,
 	}
 
 	if err := loadSysoObjects(t.objects, nil); err != nil {
@@ -38,6 +48,7 @@ func NewTracer(logger *zap.SugaredLogger, maps *addrspace.ProcMaps, reporter Rep
 	return &t, nil
 }
 
+// Trace will log all system calls that an executable makes, writing them to ./stats directory.
 func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) error {
 	t.logger.Infow("tracing program execution", "executable", executable)
 
@@ -64,7 +75,11 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	}
 	defer rd.Close()
 
-	t.processor = NewProcessor(t.logger, rd, t.maps, t.reporter, nil)
+	t.processor = NewProcessor(t.logger, rd, t.stackparser, t.reporter, &ProcessorCgf{
+		workers:         1,
+		eventChanBuffer: 1024,
+		statsChanBuffer: 1024,
+	})
 
 	cmd := exec.Command(executable, args...)
 	cmd.Stdout = os.Stdout
@@ -75,10 +90,9 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	}
 	defer cmd.Wait()
 
-	// todo: refactor into part of struct cfg
-	ctx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, t.timeout)
 
-	stopper := make(chan os.Signal)
+	stopper := make(chan os.Signal, 1)
 	signal.Notify(stopper, os.Interrupt, syscall.SIGTERM)
 	defer close(stopper)
 
@@ -104,11 +118,14 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 		return fmt.Errorf("failed to read missed stats map: %w", err)
 	}
 
-	if err := t.reporter.WriteMissed("/app/stats/missed.json", missed); err != nil {
+	ff := t.readForkFollow()
+	t.logger.Infow("fork follow", "curr", os.Getpid(), "pids", ff)
+
+	if err := t.reporter.WriteMissed("./stats/missed.json", missed); err != nil {
 		return fmt.Errorf("failed to report missed stats: %w", err)
 	}
 
-	if err := t.reporter.WriteFile("/app/stats/counts.json"); err != nil {
+	if err := t.reporter.WriteFile("./stats/counts.json"); err != nil {
 		return fmt.Errorf("failed to report syscall counts: %w", err)
 	}
 
@@ -140,10 +157,14 @@ func (t *Tracer) initMissedMap() error {
 
 func (t *Tracer) readMissedMap() (*MissedStats, error) {
 	var (
-		rbFull       uint64
-		parentFailed uint64
-		ptRegsFailed uint64
-		always       uint64
+		rbFull         uint64
+		getTaskFailed  uint64
+		parentFailed   uint64
+		ptRegsFailed   uint64
+		ignoreWrongPID uint64
+		all            uint64
+		relevant       uint64
+		emptyst        uint64
 	)
 
 	// not allowed to take an address of a constant, hence the assignment
@@ -162,23 +183,71 @@ func (t *Tracer) readMissedMap() (*MissedStats, error) {
 		return nil, fmt.Errorf("failed to read ringbuf full errors: %w", err)
 	}
 
-	i = sysoFailureTypeALWAYS
-	if err := t.objects.ErrMap.Lookup(&i, &always); err != nil {
+	i = sysoFailureTypeIGNORE_WRONG_PID
+	if err := t.objects.ErrMap.Lookup(&i, &ignoreWrongPID); err != nil {
 		return nil, fmt.Errorf("failed to read ringbuf full errors: %w", err)
+	}
+
+	i = sysoFailureTypeALL_SYSCALLS
+	if err := t.objects.ErrMap.Lookup(&i, &all); err != nil {
+		return nil, fmt.Errorf("failed to read ringbuf full errors: %w", err)
+	}
+
+	i = sysoFailureTypeGET_TASK_FAILED
+	if err := t.objects.ErrMap.Lookup(&i, &getTaskFailed); err != nil {
+		return nil, fmt.Errorf("failed to read get_task_failed errors: %w", err)
+	}
+
+	i = sysoFailureTypeEMPTY_STACKTRACE
+	if err := t.objects.ErrMap.Lookup(&i, &emptyst); err != nil {
+		return nil, fmt.Errorf("failed to read empty-stacktrace errors: %w", err)
+	}
+
+	i = sysoFailureTypeRELEVANT_SYSCALLS
+	if err := t.objects.ErrMap.Lookup(&i, &relevant); err != nil {
+		return nil, fmt.Errorf("failed to read procstart errors: %w", err)
 	}
 
 	t.logger.Infow(
 		"missed syscalls",
 		"ringbuf-full", rbFull,
+		"get-current-task-failed", getTaskFailed,
 		"get-parent-failed", parentFailed,
 		"get-pt-regs-failed", ptRegsFailed,
-		"all", always,
+		"follow-ignore-pid", ignoreWrongPID,
+		"empty-stack-trace", emptyst,
+		"procstart", relevant,
+		"all", all,
 	)
 
 	return &MissedStats{
-		RingBufFull:     rbFull,
-		GetParentFailed: parentFailed,
-		GetPTRegsFailed: ptRegsFailed,
-		All:             always,
+		RingBufFull:          rbFull,
+		GetParentFailed:      parentFailed,
+		GetCurrentTaskFailed: getTaskFailed,
+		GetPTRegsFailed:      ptRegsFailed,
+		IgnorePID:            ignoreWrongPID,
+		AllSyscalls:          all,
+		RelevantSyscalls:     relevant,
 	}, nil
+}
+
+func (t *Tracer) readForkFollow() []int32 {
+	ff := make([]int32, 0)
+
+	iter := t.objects.FollowPidMap.Iterate()
+	for {
+		var (
+			pid  int32
+			v    bool
+			next bool
+		)
+
+		next = iter.Next(&pid, &v)
+		ff = append(ff, pid)
+		if !next {
+			break
+		}
+	}
+
+	return ff
 }

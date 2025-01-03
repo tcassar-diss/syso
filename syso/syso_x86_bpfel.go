@@ -16,9 +16,14 @@ type sysoFailureType uint32
 
 const (
 	sysoFailureTypeRINGBUF_FULL       sysoFailureType = 0
-	sysoFailureTypeGET_PARENT_FAILED  sysoFailureType = 1
-	sysoFailureTypeGET_PT_REGS_FAILED sysoFailureType = 2
-	sysoFailureTypeALWAYS             sysoFailureType = 3
+	sysoFailureTypeGET_TASK_FAILED    sysoFailureType = 1
+	sysoFailureTypeGET_PARENT_FAILED  sysoFailureType = 2
+	sysoFailureTypeGET_PT_REGS_FAILED sysoFailureType = 3
+	sysoFailureTypeALL_SYSCALLS       sysoFailureType = 4
+	sysoFailureTypeRELEVANT_SYSCALLS  sysoFailureType = 5
+	sysoFailureTypeIGNORE_WRONG_PID   sysoFailureType = 6
+	sysoFailureTypeEMPTY_STACKTRACE   sysoFailureType = 7
+	sysoFailureTypeFAILURE_TYPE_END   sysoFailureType = 8
 )
 
 type sysoScEvent struct {
@@ -33,14 +38,9 @@ type sysoScEvent struct {
 }
 
 type sysoStackTraceT struct {
-	UserStackSize        int32
-	UserStackBuildidSize int32
-	UserStack            [256]uint64
-	UserStackBuildid     [256]struct {
-		Status  int32
-		BuildId [20]uint8
-		Offset  uint64
-	}
+	UserStackSize        int64
+	UserStackBuildidSize int64
+	UserStack            [64]uint64
 }
 
 // loadSyso returns the embedded CollectionSpec for syso.

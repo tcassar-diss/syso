@@ -20,17 +20,17 @@ type ProcessorCgf struct {
 }
 
 type Processor struct {
-	logger   *zap.SugaredLogger
-	rb       *ringbuf.Reader
-	maps     *addrspace.ProcMaps
-	reporter Reporter
-	cfg      *ProcessorCgf
+	logger      *zap.SugaredLogger
+	rb          *ringbuf.Reader
+	stackparser *addrspace.StackParser
+	reporter    Reporter
+	cfg         *ProcessorCgf
 }
 
 func NewProcessor(
 	logger *zap.SugaredLogger,
 	rb *ringbuf.Reader,
-	maps *addrspace.ProcMaps,
+	stackparser *addrspace.StackParser,
 	reporter Reporter,
 	cfg *ProcessorCgf,
 ) *Processor {
@@ -43,11 +43,11 @@ func NewProcessor(
 	}
 
 	return &Processor{
-		logger:   logger,
-		rb:       rb,
-		maps:     maps,
-		reporter: reporter,
-		cfg:      cfg,
+		logger:      logger,
+		rb:          rb,
+		stackparser: stackparser,
+		reporter:    reporter,
+		cfg:         cfg,
 	}
 }
 
@@ -125,9 +125,11 @@ func (p *Processor) consume(ctx context.Context, eventChan <-chan *sysoScEvent, 
 		case event = <-eventChan:
 		}
 
-		library, err := p.maps.AssignPC(event.Pc, event.Pid, event.Dirty)
+		library, err := p.stackparser.AssignPC(event.Pid, event.Stacktrace.UserStack, event.Dirty)
 		if err != nil {
-			return fmt.Errorf("failed to assign libary to syscall: %w", err)
+			p.logger.Errorw("failed to assign library to syscall: %w", err)
+
+			library = "FAILED"
 		}
 
 		statsChan <- &Stat{

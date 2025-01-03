@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"time"
 
 	"github.com/tcassar-diss/syso/addrspace"
 	"github.com/tcassar-diss/syso/syso"
@@ -19,13 +20,15 @@ func main() {
 	logger := prodLogger.Sugar()
 
 	maps := addrspace.NewProcMaps(logger)
+	stackparser := addrspace.NewStackParser(logger, &maps)
 
 	executable := os.Args[1]
 	args := os.Args[2:]
 
 	reporter := syso.NewMTReporter(logger)
 
-	tracer, err := syso.NewTracer(logger, &maps, reporter)
+	// todo: timeout and jobs as cli arguments
+	tracer, err := syso.NewTracer(logger, stackparser, reporter, 6000*time.Second, 1)
 	if err != nil {
 		logger.Fatalw("failed to create tracer", "err", err)
 	}
@@ -35,9 +38,5 @@ func main() {
 	err = tracer.Trace(ctx, executable, args...)
 	if err != nil {
 		logger.Fatalw("failed to trace", "executable", executable, "err", err)
-	}
-
-	if err := reporter.WriteFile("/app/stats/counts.json"); err != nil {
-		logger.Fatalw("failed to write stats", "err", err)
 	}
 }
