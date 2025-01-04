@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/tcassar-diss/syso/addrspace"
@@ -118,6 +119,9 @@ func (p *Processor) listen(ctx context.Context, eventChan chan<- *sysoScEvent) e
 func (p *Processor) consume(ctx context.Context, eventChan <-chan *sysoScEvent, statsChan chan<- *Stat) error {
 	var event *sysoScEvent
 
+	n := 0
+	t := time.Now()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -130,6 +134,14 @@ func (p *Processor) consume(ctx context.Context, eventChan <-chan *sysoScEvent, 
 			p.logger.Errorw("failed to assign library to syscall: %w", err)
 
 			library = "FAILED"
+		}
+
+		n++
+
+		if n == 10_000 {
+			p.logger.Infow("Processed 10,000 syscalls", "since", time.Since(t))
+			t = time.Now()
+			n = 0
 		}
 
 		statsChan <- &Stat{
