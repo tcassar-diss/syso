@@ -1,6 +1,6 @@
 *.torefactor
 naive-stats
-stats/
+stats*/
 log/
 *-stats.json
 .idea
