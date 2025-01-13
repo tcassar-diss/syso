@@ -35,7 +35,7 @@ func (m *MemMap) contains(addr uint64) bool {
 type ProcMaps struct {
 	logger      *zap.SugaredLogger
 	maps        map[int32][]*MemMap
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	pathbuilder func(int32) string
 }
 
@@ -67,9 +67,9 @@ func (p *ProcMaps) ReadAddrSpace(pid int32, dirty bool) ([]*MemMap, error) {
 		err  error
 	)
 
-	p.mu.Lock()
+	p.mu.RLock()
 	maps, ok := p.maps[pid]
-	p.mu.Unlock()
+	p.mu.RUnlock()
 
 	if dirty || !ok {
 		maps, err = p.readAddrSpace(pid)

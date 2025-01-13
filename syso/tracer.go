@@ -15,6 +15,13 @@ import (
 	"go.uber.org/zap"
 )
 
+/*
+todo:
+	- refactor such that tracer just attaches to a pid
+	- handle cmd execution etc elsewhere
+	- make sure that cmd execution handles zombies
+*/
+
 type Tracer struct {
 	logger      *zap.SugaredLogger
 	processor   *Processor
@@ -76,7 +83,7 @@ func (t *Tracer) Trace(ctx context.Context, executable string, args ...string) e
 	defer rd.Close()
 
 	t.processor = NewProcessor(t.logger, rd, t.stackparser, t.reporter, &ProcessorCgf{
-		workers:         1,
+		workers:         16,
 		eventChanBuffer: 1024,
 		statsChanBuffer: 1024,
 	})

@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 )
 
+const StackDepth = 64
 const LibcPath = "/usr/lib/x86_64-linux-gnu/libc.so.6"
 
 // StackParser will use stack traces to identify the library responsible
@@ -24,7 +25,7 @@ func NewStackParser(logger *zap.SugaredLogger, maps *ProcMaps) *StackParser {
 }
 
 // AssignPC assigns a trace of return pointers to a shared library by PID.
-func (s *StackParser) AssignPC(pid int32, trace [64]uint64, dirty bool) (string, error) {
+func (s *StackParser) AssignPC(pid int32, trace [StackDepth]uint64, dirty bool) (string, error) {
 	if trace[len(trace)-1] != 0 {
 		s.logger.Warn("deepest frame non-0 => stacktrace may not be deep enough", "pid", pid)
 	}
